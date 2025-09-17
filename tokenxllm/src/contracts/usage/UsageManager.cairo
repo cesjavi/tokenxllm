@@ -84,7 +84,8 @@ mod UsageManager {
         let free_quota = self.free_quota_per_epoch.read();
 
         let new_used: u64 = used + units;
-        let paid_units: u64 = if new_used <= free_quota { 0_u64 } else { new_used - free_quota };
+        let free_remaining: u64 = if used >= free_quota { 0_u64 } else { free_quota - used };
+        let paid_units: u64 = if units <= free_remaining { 0_u64 } else { units - free_remaining };
 
         if paid_units > 0_u64 {
             let price: u256 = self.price_per_unit_wei.read();
