@@ -1,0 +1,7 @@
+# Backend requirements.txt
+# ----------------------------------------------
+fastapi
+uvicorn
+python-dotenv
+starknet-py
+pydantic

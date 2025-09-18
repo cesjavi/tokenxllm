@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>TokenXLLM Dashboard</title>
+<link rel="stylesheet" href="style.css"/>
+</head><body>
+<div class="wrap">
+<h1>TokenXLLM Dashboard</h1>
+<section class="card">
+  <h2>Backend</h2>
+  <label>Backend Base URL</label>
+  <input id="baseUrl" value="http://localhost:8000"/>
+  <button id="btnConfig">Load Config</button>
+  <pre id="config"></pre>
+</section>
+
+<section class="card">
+  <h2>Monitor</h2>
+  <div class="grid">
+    <div>
+      <label>Your Address</label>
+      <input id="userAddr" placeholder="0x..."/>
+    </div>
+    <div class="actions">
+      <button id="btnRefresh">Refresh</button>
+    </div>
+  </div>
+  <div class="row">
+    <div class="box"><h3>Balance (AIC)</h3><pre id="balance"></pre></div>
+    <div class="box"><h3>Allowance → UM</h3><pre id="allowance"></pre></div>
+    <div class="box"><h3>Usage / Epoch</h3><pre id="usage"></pre></div>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Actions</h2>
+  <div class="grid">
+    <div>
+      <label>Approve amount (AIC)</label>
+      <input id="approveAmount" type="number" step="0.000000000000000001" value="100"/>
+      <button id="btnApprove">Approve</button>
+    </div>
+    <div>
+      <label>Authorize units</label>
+      <input id="authUnits" type="number" value="3000"/>
+      <button id="btnAuthorize">Authorize</button>
+    </div>
+  </div>
+  <div class="grid">
+    <div>
+      <label>Mint to (owner-only)</label>
+      <input id="mintTo" placeholder="0x..."/>
+    </div>
+    <div>
+      <label>Mint amount (AIC)</label>
+      <input id="mintAmount" type="number" step="0.000000000000000001" value="50"/>
+      <button id="btnMint">Mint</button>
+    </div>
+  </div>
+  <pre id="txlog"></pre>
+</section>
+</div>
+<script src="app.js"></script>
+</body></html>
