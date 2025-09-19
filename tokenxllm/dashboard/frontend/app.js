@@ -1,111 +1,241 @@
-import { connect, disconnect } from "https://cdn.jsdelivr.net/npm/starknetkit@1.0.15/+esm";
-
-const state = {
-  apiBase: determineBaseUrl(),
-  config: null,
-  wallet: null,
-  account: null,
-  address: null,
-};
-
-const elements = {
-  config: document.getElementById("config"),
-  walletAddr: document.getElementById("walletAddr"),
-  backendBase: document.getElementById("backendBase"),
-  userAddr: document.getElementById("userAddr"),
-  txlog: document.getElementById("txlog"),
-  balance: document.getElementById("balance"),
-  allowance: document.getElementById("allowance"),
-  usage: document.getElementById("usage"),
-  btnConnect: document.getElementById("btnConnect"),
-  btnDisconnect: document.getElementById("btnDisconnect"),
-  btnRefresh: document.getElementById("btnRefresh"),
-  btnApprove: document.getElementById("btnApprove"),
-  btnAuthorize: document.getElementById("btnAuthorize"),
-  approveAmount: document.getElementById("approveAmount"),
-  authUnits: document.getElementById("authUnits"),
-};
-
-elements.backendBase.textContent = state.apiBase;
-updateWalletUi(false);
-
-function determineBaseUrl(){
-  const override = window.APP_BACKEND_BASE;
-  if(override){ return normalizeBase(String(override)); }
-  if(window.location.protocol === "file:"){ return "http://localhost:8000"; }
-  const port = window.location.port;
-  if(port && port !== "8000"){ return `${window.location.protocol}//${window.location.hostname}:8000`; }
-  return normalizeBase(window.location.origin || "http://localhost:8000");
+async function api(base, path, opts){
+  const r = await fetch(`${base}${path}`, opts);
+  if(!r.ok){ throw new Error(await r.text()); }
+  return r.json();
 }
-
-function normalizeBase(url){
-  return url.replace(/\/+$/, "");
+function v(id){ return document.getElementById(id).value.trim(); }
+function set(id, txt){ document.getElementById(id).textContent = txt; }
+function setTxLog(content, opts = {}){
+  const el = document.getElementById("txlog");
+  if(opts.html){ el.innerHTML = content; }
+  else{ el.textContent = content; }
 }
+function errMsg(e){ return (e && e.message) ? e.message : String(e); }
 
-async function api(path, opts){
-  const url = `${state.apiBase}${path}`;
-  const res = await fetch(url, opts);
-  if(!res.ok){
-    const text = await res.text();
-    throw new Error(text || `${res.status} ${res.statusText}`);
+let cachedConfig = null;
+let cachedConfigBase = null;
+
+async function ensureConfig(base, opts = {}){
+  if(!base){ throw new Error("Configura primero la URL del backend"); }
+  const force = Boolean(opts.force);
+  if(force || !cachedConfig || cachedConfigBase !== base){
+    cachedConfig = await api(base, "/config");
+    cachedConfigBase = base;
   }
-  return res.json();
+  return cachedConfig;
 }
 
-function setText(el, value){
-  el.textContent = value;
-}
+const TX_STAGES = [
+  { label: "firmando…", delay: 0 },
+  { label: "enviando…", delay: 500 },
+  { label: "confirmando…", delay: 1200 },
+];
 
-function formatError(err){
-  if(err instanceof Error){ return err.message; }
-  if(typeof err === "string"){ return err; }
-  try{ return JSON.stringify(err); }
-  catch(_){ return String(err); }
-}
+function delay(ms){ return new Promise(res => setTimeout(res, ms)); }
 
-async function loadConfig(){
-  try{
-    const cfg = await api("/config");
-    state.config = cfg;
-    setText(elements.config, JSON.stringify(cfg, null, 2));
-    return cfg;
-  }catch(err){
-    setText(elements.config, `config error: ${formatError(err)}`);
-    throw err;
-  }
-}
-
-async function ensureConfig(){
-  if(state.config){ return state.config; }
-  return loadConfig();
-}
-
-function updateWalletUi(connected){
-  if(connected){
-    const chain = state.wallet?.chainId ?? "unknown";
-    setText(elements.walletAddr, `${state.address}\nchain: ${chain}`);
-    setText(elements.userAddr, state.address || "");
-  }else{
-    setText(elements.walletAddr, "Not connected");
-    setText(elements.userAddr, "—");
-  }
-  elements.btnDisconnect.classList.toggle("hidden", !connected);
-  [elements.btnRefresh, elements.btnApprove, elements.btnAuthorize].forEach(btn => {
-    if(btn){ btn.disabled = !connected; }
-  });
-}
-
-async function attemptAutoConnect(){
-  try{
-    const result = await connect({ modalMode: "neverAsk" });
-    if(result && result.wallet){
-      applyWallet(result.wallet);
+async function withTxLifecycle(actionLabel, op){
+  let cancelled = false;
+  const stagePromise = (async () => {
+    for(const stage of TX_STAGES){
+      if(cancelled) break;
+      if(stage.delay){ await delay(stage.delay); if(cancelled) break; }
+      setTxLog(`${actionLabel} - ${stage.label}`);
     }
-  }catch(err){
-    console.warn("auto connect failed", err);
+  })();
+  try{
+    const result = await op();
+    cancelled = true;
+    await stagePromise;
+    return result;
+  }catch(e){
+    cancelled = true;
+    await stagePromise;
+    throw e;
   }
 }
 
+function detectNetworkMeta(rpcUrl){
+  const url = (rpcUrl || "").toLowerCase();
+  if(url.includes("mainnet")){
+    return { label: "Mainnet", starkscan: "https://starkscan.co/tx/", voyager: "https://voyager.online/tx/" };
+  }
+  if(url.includes("goerli") || url.includes("testnet")){
+    return { label: "Goerli", starkscan: "https://goerli.starkscan.co/tx/", voyager: "https://goerli.voyager.online/tx/" };
+  }
+  if(url.includes("sepolia")){
+    return { label: "Sepolia", starkscan: "https://sepolia.starkscan.co/tx/", voyager: "https://sepolia.voyager.online/tx/" };
+  }
+  return { label: "Starknet", starkscan: "https://starkscan.co/tx/", voyager: "https://voyager.online/tx/" };
+}
+
+function explorerLinks(txHash, cfg){
+  const meta = detectNetworkMeta(cfg && cfg.rpc_url);
+  const links = [
+    `<a href="${meta.starkscan}${txHash}" target="_blank" rel="noreferrer">StarkScan (${meta.label})</a>`,
+    `<a href="${meta.voyager}${txHash}" target="_blank" rel="noreferrer">Voyager (${meta.label})</a>`
+  ];
+  return { label: meta.label, html: links.join(" · ") };
+}
+
+function decimalToWei(value, decimals){
+  if(value == null) return 0n;
+  const str = String(value).trim();
+  if(!str){ return 0n; }
+  const negative = str.startsWith("-");
+  const sanitized = negative ? str.slice(1) : str;
+  const parts = sanitized.split(".");
+  const intPart = parts[0] || "0";
+  const fracRaw = parts[1] || "";
+  const frac = (fracRaw + "0".repeat(decimals)).slice(0, decimals);
+  const base = 10n ** BigInt(decimals);
+  const wei = BigInt(intPart || "0") * base + BigInt(frac || "0");
+  return negative ? -wei : wei;
+}
+
+function formatWeiAmount(wei, decimals, maxFractionDigits = 6){
+  const base = 10n ** BigInt(decimals);
+  const negative = wei < 0n;
+  const absWei = negative ? -wei : wei;
+  const intPart = absWei / base;
+  let frac = (absWei % base).toString().padStart(decimals, "0");
+  if(maxFractionDigits >= 0){ frac = frac.slice(0, maxFractionDigits); }
+  frac = frac.replace(/0+$/, "");
+  const body = frac ? `${intPart}.${frac}` : intPart.toString();
+  return negative ? `-${body}` : body;
+}
+
+function computeEstimatedCostWei(units, cfg){
+  const decimals = Number(cfg && cfg.decimals != null ? cfg.decimals : 18);
+  const unitsBig = BigInt(units);
+  if(unitsBig <= 0n) return 0n;
+  if(cfg && cfg.estimated_cost_per_unit_wei){
+    try{ return BigInt(cfg.estimated_cost_per_unit_wei) * unitsBig; }
+    catch(_){ /* ignore */ }
+  }
+  if(cfg && cfg.price_per_unit_wei){
+    try{ return BigInt(cfg.price_per_unit_wei) * unitsBig; }
+    catch(_){ /* ignore */ }
+  }
+  if(cfg && (cfg.estimated_cost_per_unit_AIC || cfg.cost_per_unit_AIC)){
+    const perUnit = cfg.estimated_cost_per_unit_AIC || cfg.cost_per_unit_AIC;
+    const perUnitWei = decimalToWei(perUnit, decimals);
+    if(perUnitWei > 0n){ return perUnitWei * unitsBig; }
+  }
+  // Sin información adicional asumimos 1 token completo por unidad.
+  const base = 10n ** BigInt(decimals);
+  return unitsBig * base;
+}
+
+document.getElementById("btnConfig").onclick = async () => {
+  const base = v("baseUrl");
+  try{
+    const cfg = await ensureConfig(base, {force: true});
+    set("config", JSON.stringify(cfg, null, 2));
+  }catch(e){
+    set("config", errMsg(e));
+  }
+};
+
+document.getElementById("btnRefresh").onclick = async () => {
+  const base = v("baseUrl"), user = v("userAddr");
+  if(!user){ alert("Enter your address"); return; }
+  try{
+    const cfg = await ensureConfig(base);
+    const userEnc = encodeURIComponent(user);
+    const bal = await api(base, `/balance?user=${userEnc}`);
+    set("balance", `wei: ${bal.balance_wei}\nAIC: ${bal.balance_AIC}`);
+    if(cfg.um_addr){
+      const spenderEnc = encodeURIComponent(cfg.um_addr);
+      const al = await api(base, `/allowance?owner=${userEnc}&spender=${spenderEnc}`);
+      const used = await api(base, `/used?user=${userEnc}`);
+      const ep = await api(base, `/epoch`);
+      set("allowance", `wei: ${al.allowance_wei}\nAIC: ${al.allowance_AIC}`);
+      set("usage", `used_units: ${used.used_units}\nepoch_id: ${ep.epoch_id}`);
+    }else{
+      set("allowance", "UM_ADDR not configured");
+      set("usage", "UM_ADDR not configured");
+    }
+  }catch(e){ set("balance", errMsg(e)); }
+};
+
+document.getElementById("btnApprove").onclick = async () => {
+  const base = v("baseUrl"), amount = parseFloat(v("approveAmount"));
+  if(!Number.isFinite(amount) || amount <= 0){
+    setTxLog("Ingresa un monto válido para aprobar.");
+    return;
+  }
+  try{
+    const cfg = await ensureConfig(base);
+    const result = await withTxLifecycle("Aprobación", () => api(
+      base,
+      "/approve",
+      {method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify({amount})}
+    ));
+    const links = explorerLinks(result.tx_hash, cfg);
+    setTxLog(
+      `<div>Aprobación enviada (${links.label}).</div>` +
+      `<div>Tx: <code>${result.tx_hash}</code></div>` +
+      `<div>${links.html}</div>`,
+      {html:true}
+    );
+  }catch(e){ setTxLog(`approve error: ${errMsg(e)}`); }
+};
+
+document.getElementById("btnAuthorize").onclick = async () => {
+  const base = v("baseUrl"), units = parseInt(v("authUnits"),10), user = v("userAddr");
+  if(!user){
+    setTxLog("Ingresa tu dirección para validar la allowance antes de autorizar.");
+    return;
+  }
+  if(!Number.isFinite(units) || units <= 0){
+    setTxLog("Ingresa una cantidad de unidades válida para autorizar.");
+    return;
+  }
+  try{
+    const cfg = await ensureConfig(base);
+    if(!cfg.um_addr){
+      setTxLog("UM_ADDR no está configurada en el backend; no es posible autorizar.");
+      return;
+    }
+    const ownerEnc = encodeURIComponent(user);
+    const spenderEnc = encodeURIComponent(cfg.um_addr);
+    const allowance = await api(base, `/allowance?owner=${ownerEnc}&spender=${spenderEnc}`);
+    if(!allowance || allowance.allowance_wei == null){
+      setTxLog("No se pudo recuperar la allowance desde el backend.");
+      return;
+    }
+    let allowanceWei;
+    try{ allowanceWei = BigInt(allowance.allowance_wei); }
+    catch(_){
+      setTxLog("La allowance recibida es inválida.");
+      return;
+    }
+    const decimals = Number(cfg && cfg.decimals != null ? cfg.decimals : 18);
+    if(allowanceWei <= 0n){
+      setTxLog("La allowance actual es 0 AIC. Realiza un approve antes de autorizar.");
+      return;
+    }
+    const estimatedCostWei = computeEstimatedCostWei(units, cfg);
+    if(estimatedCostWei > allowanceWei){
+      const allowanceTxt = formatWeiAmount(allowanceWei, decimals);
+      const costTxt = formatWeiAmount(estimatedCostWei, decimals);
+      setTxLog(`Allowance insuficiente (${allowanceTxt} AIC) frente al costo estimado (${costTxt} AIC). Ejecuta un approve mayor antes de autorizar.`);
+      return;
+    }
+    const result = await withTxLifecycle("Autorización", () => api(
+      base,
+      "/authorize",
+      {method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify({units})}
+    ));
+    const links = explorerLinks(result.tx_hash, cfg);
+    setTxLog(
+      `<div>Autorización enviada (${links.label}).</div>` +
+      `<div>Tx: <code>${result.tx_hash}</code></div>` +
+      `<div>${links.html}</div>`,
+      {html:true}
+    );
+  }catch(e){ setTxLog(`authorize error: ${errMsg(e)}`); }
+};
 function applyWallet(wallet){
   state.wallet = wallet;
   state.account = wallet.account;
@@ -123,187 +253,7 @@ function clearWallet(){
 
 async function refreshData(){
   try{
-    ensureWallet();
-  }catch(_){
-    alert("Connect your wallet first");
-    return;
-  }
-  let cfg;
-  try{
-    cfg = await ensureConfig();
-  }catch(err){
-    setText(elements.balance, formatError(err));
-    return;
-  }
-  const user = encodeURIComponent(state.address);
-  try{
-    const bal = await api(`/balance?user=${user}`);
-    setText(elements.balance, `wei: ${bal.balance_wei}\nAIC: ${bal.balance_AIC}`);
-  }catch(err){
-    setText(elements.balance, `balance error: ${formatError(err)}`);
-  }
-  if(cfg.um_addr){
-    try{
-      const spender = encodeURIComponent(cfg.um_addr);
-      const [allowance, used, epoch] = await Promise.all([
-        api(`/allowance?owner=${user}&spender=${spender}`),
-        api(`/used?user=${user}`),
-        api(`/epoch`),
-      ]);
-      setText(elements.allowance, `wei: ${allowance.allowance_wei}\nAIC: ${allowance.allowance_AIC}`);
-      setText(elements.usage, `used_units: ${used.used_units}\nepoch_id: ${epoch.epoch_id}`);
-    }catch(err){
-      setText(elements.allowance, `allowance error: ${formatError(err)}`);
-      setText(elements.usage, `usage error: ${formatError(err)}`);
-    }
-  }else{
-    setText(elements.allowance, "UM_ADDR not configured");
-    setText(elements.usage, "UM_ADDR not configured");
-  }
-}
-
-function toUint256(value){
-  const mask = (1n << 128n) - 1n;
-  const lo = value & mask;
-  const hi = value >> 128n;
-  return [lo.toString(), hi.toString()];
-}
-
-function parseUnits(value, decimals){
-  const trimmed = String(value ?? "").trim();
-  if(!trimmed){ throw new Error("Enter an amount"); }
-  if(!/^\d*(\.\d*)?$/.test(trimmed)){ throw new Error("Invalid amount format"); }
-  const [wholeRaw, fracRaw = ""] = trimmed.split(".");
-  const base = 10n ** BigInt(decimals);
-  const whole = wholeRaw ? BigInt(wholeRaw) : 0n;
-  const fracPadded = (fracRaw + "0".repeat(decimals)).slice(0, decimals);
-  const fraction = fracPadded ? BigInt(fracPadded) : 0n;
-  return whole * base + fraction;
-}
-
-function ensureWallet(){
-  if(!state.wallet || !state.account || !state.address){
-    throw new Error("Connect your wallet first");
-  }
-  return state.wallet;
-}
-
-async function doApprove(){
-  let wallet;
-  try{
-    wallet = ensureWallet();
-  }catch(err){
-    setText(elements.txlog, formatError(err));
-    return;
-  }
-  let cfg;
-  try{
-    cfg = await ensureConfig();
-  }catch(err){
-    setText(elements.txlog, `config error: ${formatError(err)}`);
-    return;
-  }
-  if(!cfg.aic_addr || !cfg.um_addr){
-    setText(elements.txlog, "AIC_ADDR/UM_ADDR not configured");
-    return;
-  }
-  try{
-    const decimals = cfg.decimals ?? 18;
-    const weiAmount = parseUnits(elements.approveAmount.value, decimals);
-    const [lo, hi] = toUint256(weiAmount);
-    const { transaction_hash } = await wallet.account.execute({
-      contractAddress: cfg.aic_addr,
-      entrypoint: "approve",
-      calldata: [cfg.um_addr, lo, hi],
-    });
-    setText(elements.txlog, `approve tx: ${transaction_hash}`);
-  }catch(err){
-    setText(elements.txlog, `approve error: ${formatError(err)}`);
-  }
-}
-
-async function doAuthorize(){
-  let wallet;
-  try{
-    wallet = ensureWallet();
-  }catch(err){
-    setText(elements.txlog, formatError(err));
-    return;
-  }
-  let cfg;
-  try{
-    cfg = await ensureConfig();
-  }catch(err){
-    setText(elements.txlog, `config error: ${formatError(err)}`);
-    return;
-  }
-  if(!cfg.um_addr){
-    setText(elements.txlog, "UM_ADDR not configured");
-    return;
-  }
-  const unitsRaw = String(elements.authUnits.value ?? "").trim();
-  if(!unitsRaw){
-    setText(elements.txlog, "Enter units to authorize");
-    return;
-  }
-  let units;
-  try{
-    units = BigInt(unitsRaw);
-  }catch(err){
-    setText(elements.txlog, `Invalid units: ${formatError(err)}`);
-    return;
-  }
-  if(units < 0n){
-    setText(elements.txlog, "Units must be non-negative");
-    return;
-  }
-  try{
-    const { transaction_hash } = await wallet.account.execute({
-      contractAddress: cfg.um_addr,
-      entrypoint: "authorize_usage",
-      calldata: [units.toString()],
-    });
-    setText(elements.txlog, `authorize tx: ${transaction_hash}`);
-  }catch(err){
-    setText(elements.txlog, `authorize error: ${formatError(err)}`);
-  }
-}
-
-elements.btnConnect.addEventListener("click", async () => {
-  try{
-    const result = await connect({ modalMode: "alwaysAsk" });
-    if(result && result.wallet){
-      applyWallet(result.wallet);
-    }
-  }catch(err){
-    setText(elements.txlog, `wallet error: ${formatError(err)}`);
-  }
-});
-
-elements.btnDisconnect.addEventListener("click", async () => {
-  try{
-    await disconnect({ clearLastWallet: true });
-  }catch(err){
-    console.warn("disconnect error", err);
-  }
-  clearWallet();
-});
-
-document.getElementById("btnConfig").addEventListener("click", () => {
-  loadConfig().catch(() => {});
-});
-
-elements.btnRefresh.addEventListener("click", () => {
-  refreshData();
-});
-
-elements.btnApprove.addEventListener("click", () => {
-  doApprove();
-});
-
-elements.btnAuthorize.addEventListener("click", () => {
-  doAuthorize();
-});
-
-loadConfig().catch(() => {});
-attemptAutoConnect();
+    const r = await api(base, "/mint", {method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify({to, amount})});
+    setTxLog(`mint tx: ${r.tx_hash}`);
+  }catch(e){ setTxLog(`mint error: ${errMsg(e)}`); }
+};
