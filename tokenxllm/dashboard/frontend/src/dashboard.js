@@ -11,6 +11,9 @@ import {
 } from "./services/backend";
 import { connectWallet, getProvider } from "./clients/starknet";
 
+let backendConfig = null;
+let writesEnabled = false;
+
 function byId(id) {
   return document.getElementById(id);
 }
@@ -66,12 +69,61 @@ function formatUsageResponse(used, epoch) {
   return parts.join("\n");
 }
 
+function displaySignerAddress(address) {
+  setText("signerAddress", address || "Not configured");
+}
+
+function applyWriteAvailability(enabled) {
+  writesEnabled = Boolean(enabled);
+  const buttons = ["btnApprove", "btnAuthorize", "btnMint"]
+    .map((id) => byId(id))
+    .filter(Boolean);
+
+  buttons.forEach((button) => {
+    button.disabled = !writesEnabled;
+    if (writesEnabled) {
+      button.removeAttribute("title");
+    } else {
+      button.setAttribute("title", "Backend writes are disabled");
+    }
+  });
+
+  setText("writesEnabled", writesEnabled ? "Yes" : "No");
+}
+
+function applyBackendConfig(config) {
+  backendConfig = config ?? null;
+  const signerAddress = backendConfig?.account_address || "";
+  applyWriteAvailability(Boolean(backendConfig?.writes_enabled));
+  displaySignerAddress(signerAddress);
+}
+
+async function preloadBackendConfig() {
+  try {
+    const config = await getBackendConfig();
+    applyBackendConfig(config);
+  } catch (error) {
+    applyBackendConfig(null);
+    console.warn("Failed to load backend config", error);
+  }
+}
+
+function ensureWritesAreEnabled() {
+  if (!writesEnabled) {
+    alert("Writes are disabled on the backend. Configure signer credentials first.");
+    return false;
+  }
+  return true;
+}
+
 function updateEnvironmentSection() {
   setText("backendUrl", appConfig.backendUrl || "Not configured");
   setText("rpcUrl", appConfig.rpcUrl || "Not configured");
   setText("aicAddress", appConfig.aicAddress || "Not configured");
   setText("umAddress", appConfig.umAddress || "Not configured");
   setText("decimals", String(appConfig.decimals));
+  applyWriteAvailability(writesEnabled);
+  displaySignerAddress(backendConfig?.account_address || "");
 
   // Instantiate the Starknet provider when the RPC is available so imports are exercised.
   if (appConfig.rpcUrl) {
@@ -119,6 +171,7 @@ function configureFormDefaults() {
 async function handleLoadConfig() {
   try {
     const config = await getBackendConfig();
+    applyBackendConfig(config);
     setText(
       "config",
       formatJson({
@@ -133,6 +186,7 @@ async function handleLoadConfig() {
       }),
     );
   } catch (error) {
+    applyBackendConfig(null);
     setText("config", String(error));
   }
 }
@@ -172,6 +226,9 @@ async function handleRefresh() {
 }
 
 async function handleApprove() {
+  if (!ensureWritesAreEnabled()) {
+    return;
+  }
   const value = readValue("approveAmount");
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) {
@@ -188,6 +245,9 @@ async function handleApprove() {
 }
 
 async function handleAuthorize() {
+  if (!ensureWritesAreEnabled()) {
+    return;
+  }
   const value = readValue("authUnits");
   const units = Number.parseInt(value, 10);
   if (!Number.isInteger(units) || units <= 0) {
@@ -204,6 +264,9 @@ async function handleAuthorize() {
 }
 
 async function handleMint() {
+  if (!ensureWritesAreEnabled()) {
+    return;
+  }
   const to = readValue("mintTo");
   const value = readValue("mintAmount");
   const amount = Number(value);
@@ -244,6 +307,7 @@ function init() {
   configureFormDefaults();
   exposeStarknetHelpers();
   attachEventHandlers();
+  preloadBackendConfig();
 }
 
 export function initDashboard() {
