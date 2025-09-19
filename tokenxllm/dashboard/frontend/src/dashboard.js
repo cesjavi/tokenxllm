@@ -1,4 +1,4 @@
-import { appConfig } from "./config";
+import { appConfig } from "./config.js";
 import {
   approve,
   authorize,
@@ -8,7 +8,7 @@ import {
   getEpoch,
   getUsedUnits,
   mint,
-} from "./services/backend";
+} from "./services/backend.js";
 import { connectWallet, getProvider } from "./clients/starknet";
 
 let backendConfig = null;
