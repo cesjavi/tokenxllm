@@ -1,7 +1,15 @@
 const sanitize = (value) => (typeof value === "string" ? value.trim() : value);
 
+const env = (() => {
+  try {
+    return (import.meta && import.meta.env) || {};
+  } catch (error) {
+    return {};
+  }
+})();
+
 const parsedDecimals = (() => {
-  const raw = sanitize(import.meta.env.VITE_DECIMALS);
+  const raw = sanitize(env.VITE_DECIMALS);
   if (raw === undefined || raw === null || raw === "") {
     return undefined;
   }
@@ -10,10 +18,10 @@ const parsedDecimals = (() => {
 })();
 
 export const appConfig = {
-  backendUrl: sanitize(import.meta.env.VITE_BACKEND_URL) || "",
-  rpcUrl: sanitize(import.meta.env.VITE_RPC_URL) || "",
-  aicAddress: sanitize(import.meta.env.VITE_AIC_ADDR) || "",
-  umAddress: sanitize(import.meta.env.VITE_UM_ADDR) || "",
+  backendUrl: sanitize(env.VITE_BACKEND_URL) || "",
+  rpcUrl: sanitize(env.VITE_RPC_URL) || "",
+  aicAddress: sanitize(env.VITE_AIC_ADDR) || "",
+  umAddress: sanitize(env.VITE_UM_ADDR) || "",
   decimals: parsedDecimals ?? 18,
 };
 
