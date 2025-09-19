@@ -156,6 +156,15 @@ python tokenxllm.py authorize --units 3000
 python tokenxllm.py used
 python tokenxllm.py epoch
 
+Ejemplo paso a paso del flujo de cuota gratis vs pagada:
+
+```
+python examples/free_vs_paid/example_free_paid.py
+```
+
+El directorio `examples/free_vs_paid/` incluye una guía con los requisitos y
+cómo interpretar los cambios en `used_in_current_epoch` y la `allowance`.
+
 9) Dashboard – Backend (FastAPI)
 cd dashboard/backend
 python3 -m venv venv
