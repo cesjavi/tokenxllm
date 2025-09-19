@@ -69,11 +69,31 @@ def load_from_accounts_file():
         return priv, addr
     return None, None
 
-async def make_client_and_account():
+def make_client() -> FullNodeClient:
     load_dotenv()
-
     rpc = req("RPC_URL")
-    client = FullNodeClient(node_url=rpc)
+    return FullNodeClient(node_url=rpc)
+
+def resolve_address(target_address: str | None, *, required: bool = True) -> str | None:
+    load_dotenv()
+    if target_address:
+        return target_address
+
+    addr_env = os.getenv("ACCOUNT_ADDRESS")
+    if addr_env:
+        return addr_env
+
+    _, addr_file = load_from_accounts_file()
+    if addr_file:
+        return addr_file
+
+    if required:
+        raise RuntimeError("Falta ACCOUNT_ADDRESS (o no se pudo deducir del ACCOUNTS_FILE).")
+
+    return None
+
+async def make_client_and_account():
+    client = make_client()
     chain_id = await client.get_chain_id()
 
     priv = os.getenv("PRIVATE_KEY")
@@ -121,24 +141,24 @@ async def invoke(account: Account, to_addr_hex: str, fn: str, calldata: list[int
     await account.client.wait_for_tx(tx.transaction_hash)
     return tx.transaction_hash
 
-async def do_balance():
-    client, _ = await make_client_and_account()
-    owner = req("ACCOUNT_ADDRESS") if os.getenv("ACCOUNT_ADDRESS") else load_from_accounts_file()[1]
+async def do_balance(target_address: str | None):
+    client = make_client()
+    owner = resolve_address(target_address)
     aic = req("AIC_ADDR")
     bal_wei = await call_u256(client, aic, "balance_of", [h(owner)])
     print("balance_wei:", bal_wei)
     print("balance_AIC:", Decimal(bal_wei) / (Decimal(10) ** 18))
 
-async def do_used():
-    client, _ = await make_client_and_account()
-    owner = req("ACCOUNT_ADDRESS") if os.getenv("ACCOUNT_ADDRESS") else load_from_accounts_file()[1]
+async def do_used(target_address: str | None):
+    client = make_client()
+    owner = resolve_address(target_address)
     um = req("UM_ADDR")
     used = await call_u64(client, um, "used_in_current_epoch", [h(owner)])
     print("used_units:", used)
 
-async def do_allowance():
-    client, _ = await make_client_and_account()
-    owner = req("ACCOUNT_ADDRESS") if os.getenv("ACCOUNT_ADDRESS") else load_from_accounts_file()[1]
+async def do_allowance(target_address: str | None):
+    client = make_client()
+    owner = resolve_address(target_address)
     aic = req("AIC_ADDR"); um = req("UM_ADDR")
     allow_wei = await call_u256(client, aic, "allowance", [h(owner), h(um)])
     print("allowance_wei:", allow_wei)
@@ -153,7 +173,7 @@ async def do_approve(amount_tokens: str):
 
 async def do_mint(amount_tokens: str, to_addr: str | None):
     _, account = await make_client_and_account()
-    aic = req("AIC_ADDR"); to = to_addr or (os.getenv("ACCOUNT_ADDRESS") or load_from_accounts_file()[1])
+    aic = req("AIC_ADDR"); to = resolve_address(to_addr)
     amt_wei = tokens_to_wei(amount_tokens, 18); low, high = to_u256(amt_wei)
     tx_hash = await invoke(account, aic, "mint", [h(to), low, high])
     print("mint_tx:", hex(tx_hash))
@@ -164,28 +184,35 @@ async def do_authorize(units: int):
     tx_hash = await invoke(account, um, "authorize_usage", [int(units)])
     print("authorize_usage_tx:", hex(tx_hash))
 
-async def do_epoch():
-    client, _ = await make_client_and_account()
+async def do_epoch(target_address: str | None):
+    client = make_client()
     um = req("UM_ADDR")
+    resolved = resolve_address(target_address, required=False)
+    if resolved:
+        print("address:", resolved)
     eid = await call_u64(client, um, "get_epoch_id", [])
     print("epoch_id:", eid)
 
 def main():
     parser = argparse.ArgumentParser(prog="tokenxllm")
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("balance"); sub.add_parser("used"); sub.add_parser("allowance"); sub.add_parser("epoch")
+
+    p_bal = sub.add_parser("balance");   p_bal.add_argument("--address", default=None)
+    p_used = sub.add_parser("used");      p_used.add_argument("--address", default=None)
+    p_allow = sub.add_parser("allowance");p_allow.add_argument("--address", default=None)
+    p_epoch = sub.add_parser("epoch");    p_epoch.add_argument("--address", default=None)
     p_app = sub.add_parser("approve");   p_app.add_argument("--amount", required=True)
     p_mint = sub.add_parser("mint");     p_mint.add_argument("--amount", required=True); p_mint.add_argument("--to", default=None)
     p_auth = sub.add_parser("authorize");p_auth.add_argument("--units", required=True, type=int)
     args = parser.parse_args()
 
-    if args.cmd == "balance":      asyncio.run(do_balance())
-    elif args.cmd == "used":       asyncio.run(do_used())
-    elif args.cmd == "allowance":  asyncio.run(do_allowance())
+    if args.cmd == "balance":      asyncio.run(do_balance(args.address))
+    elif args.cmd == "used":       asyncio.run(do_used(args.address))
+    elif args.cmd == "allowance":  asyncio.run(do_allowance(args.address))
     elif args.cmd == "approve":    asyncio.run(do_approve(args.amount))
     elif args.cmd == "mint":       asyncio.run(do_mint(args.amount, args.to))
     elif args.cmd == "authorize":  asyncio.run(do_authorize(args.units))
-    elif args.cmd == "epoch":      asyncio.run(do_epoch())
+    elif args.cmd == "epoch":      asyncio.run(do_epoch(args.address))
 
 if __name__ == "__main__":
     main()
