@@ -236,9 +236,22 @@ document.getElementById("btnAuthorize").onclick = async () => {
     );
   }catch(e){ setTxLog(`authorize error: ${errMsg(e)}`); }
 };
+function applyWallet(wallet){
+  state.wallet = wallet;
+  state.account = wallet.account;
+  state.address = wallet.selectedAddress || wallet.account?.address || null;
+  updateWalletUi(true);
+  refreshData().catch(() => {});
+}
 
-document.getElementById("btnMint").onclick = async () => {
-  const base = v("baseUrl"), to = v("mintTo"), amount = parseFloat(v("mintAmount"));
+function clearWallet(){
+  state.wallet = null;
+  state.account = null;
+  state.address = null;
+  updateWalletUi(false);
+}
+
+async function refreshData(){
   try{
     const r = await api(base, "/mint", {method:"POST", headers:{'Content-Type':'application/json'}, body: JSON.stringify({to, amount})});
     setTxLog(`mint tx: ${r.tx_hash}`);
