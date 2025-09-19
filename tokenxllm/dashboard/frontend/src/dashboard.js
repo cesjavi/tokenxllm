@@ -9,7 +9,7 @@ import {
   getUsedUnits,
   mint,
 } from "./services/backend.js";
-import { connectWallet, getProvider } from "./clients/starknet";
+import { connectWallet, getProvider } from "./clients/starknet.js";
 
 let backendConfig = null;
 let writesEnabled = false;

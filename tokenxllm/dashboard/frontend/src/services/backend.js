@@ -1,4 +1,4 @@
-import { appConfig, assertBackendConfigured } from "../config";
+import { appConfig, assertBackendConfigured } from "../config.js";
 
 async function request(path, options = {}) {
   assertBackendConfigured();
