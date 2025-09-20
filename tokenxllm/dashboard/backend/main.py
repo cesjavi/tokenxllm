@@ -219,6 +219,15 @@ def _tokens_to_wei(amount: Decimal, decimals: int = DECIMALS) -> int:
         raise HTTPException(status_code=400, detail=f"Invalid decimal amount: {exc}") from exc
     return int(scaled)
 
+
+def _wei_to_tokens_str(amount_wei: int, decimals: int = DECIMALS) -> str:
+    if decimals <= 0:
+        return format(Decimal(amount_wei), "f")
+
+    scale = Decimal(10) ** decimals
+    decimal_value = Decimal(amount_wei) / scale
+    return format(decimal_value, "f")
+
 async def _invoke(to_addr_hex: str, fn: str, calldata: list[int]) -> str:
     account = await _get_account()
     call = Call(to_addr=_h(to_addr_hex), selector=get_selector_from_name(fn), calldata=calldata)
@@ -297,14 +306,20 @@ async def balance(user: str):
     aic = _require_env_addr(AIC_ADDR_H, "AIC_ADDR")
     lo, hi = (await _read(aic, "balance_of", [_h(user)]) + [0, 0])[:2]
     wei = _from_u256(lo, hi)
-    return {"balance_wei": str(wei), "balance_AIC": float(wei) / (10 ** DECIMALS)}
+    return {
+        "balance_wei": str(wei),
+        "balance_AIC": _wei_to_tokens_str(wei, DECIMALS),
+    }
 
 @app.get("/allowance")
 async def allowance(owner: str, spender: str):
     aic = _require_env_addr(AIC_ADDR_H, "AIC_ADDR")
     lo, hi = (await _read(aic, "allowance", [_h(owner), _h(spender)]) + [0, 0])[:2]
     wei = _from_u256(lo, hi)
-    return {"allowance_wei": str(wei), "allowance_AIC": float(wei) / (10 ** DECIMALS)}
+    return {
+        "allowance_wei": str(wei),
+        "allowance_AIC": _wei_to_tokens_str(wei, DECIMALS),
+    }
 
 @app.get("/used")
 async def used(user: str):
