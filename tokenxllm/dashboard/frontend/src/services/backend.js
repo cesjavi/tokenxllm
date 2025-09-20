@@ -42,6 +42,11 @@ export function getUsedUnits(userAddress) {
   return request(`/used?user=${encodeURIComponent(userAddress)}`);
 }
 
+export function getFreeQuota(userAddress) {
+  const query = userAddress ? `?user=${encodeURIComponent(userAddress)}` : "";
+  return request(`/free_quota${query}`);
+}
+
 export function getEpoch() {
   return request(`/epoch`);
 }
