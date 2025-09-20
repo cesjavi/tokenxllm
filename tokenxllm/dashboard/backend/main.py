@@ -6,11 +6,11 @@ from functools import lru_cache
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
-from dotenv import load_dotenv
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
-# starknet_py: sólo lo usamos para lecturas (RPC)
+# starknet_py
 from starknet_py.net.full_node_client import FullNodeClient  # type: ignore
 try:
     from starknet_py.net.client_models import Call  # type: ignore
@@ -22,21 +22,24 @@ from starknet_py.hash.selector import get_selector_from_name  # type: ignore
 from starknet_py.hash.storage import get_storage_var_address  # type: ignore
 
 load_dotenv()
-
 getcontext().prec = 80
 
 RPC_URL    = os.getenv("RPC_URL", "https://starknet-sepolia.public.blastapi.io/rpc/v0_9")
-AIC_ADDR_H = os.getenv("AIC_ADDR", "").strip()
-UM_ADDR_H  = os.getenv("UM_ADDR", "").strip()
+AIC_ADDR_H = (os.getenv("AIC_ADDR") or "").strip()
+UM_ADDR_H  = (os.getenv("UM_ADDR")  or "").strip()
 DECIMALS   = int(os.getenv("AIC_DECIMALS", "18"))
+
 DEFAULT_ACCOUNTS_FILE = os.path.expanduser("~/.starknet_accounts/starknet_open_zeppelin_accounts.json")
 
 _RPC_CLIENT: FullNodeClient | None = None
 _ACCOUNT: Account | None = None
 _ACCOUNT_LOCK = asyncio.Lock()
 
+# Storage slots (compatibles con tu contrato original)
 _FREE_QUOTA_KEY = get_storage_var_address("UsageManager_free_quota_per_epoch")
 _PRICE_PER_UNIT_BASE_KEY = get_storage_var_address("UsageManager_price_per_unit_wei")
+
+# -------------------- utils --------------------
 
 def _h(x: str | int) -> int:
     if isinstance(x, int):
@@ -73,13 +76,11 @@ def _load_from_accounts_file() -> tuple[str | None, str | None]:
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-    except FileNotFoundError:
-        return None, None
-    except json.JSONDecodeError:
+    except (FileNotFoundError, json.JSONDecodeError):
         return None, None
 
     for net_key in ("alpha-sepolia", "sepolia", "SN_SEPOLIA", "Sepolia"):
-        entry = data.get(net_key)
+        entry = data.get(net_key) if isinstance(data, dict) else None
         if isinstance(entry, dict):
             acct = entry.get(name)
             if isinstance(acct, dict):
@@ -88,6 +89,7 @@ def _load_from_accounts_file() -> tuple[str | None, str | None]:
                 if priv and addr:
                     return str(priv), str(addr)
 
+    # búsqueda profunda por si el json tiene otra forma
     def find_account(obj: Any) -> tuple[str | None, str | None] | None:
         if isinstance(obj, dict):
             lowered = {k.lower(): k for k in obj.keys()}
@@ -108,9 +110,7 @@ def _load_from_accounts_file() -> tuple[str | None, str | None]:
         return None
 
     result = find_account(data)
-    if result:
-        return result
-    return None, None
+    return result if result else (None, None)
 
 @lru_cache(maxsize=1)
 def _signer_credentials() -> dict[str, Any] | None:
@@ -133,11 +133,7 @@ def _signer_credentials() -> dict[str, Any] | None:
     except ValueError:
         return None
 
-    return {
-        "private_key": priv_int,
-        "address": addr_int,
-        "address_hex": _as_hex(addr_int),
-    }
+    return {"private_key": priv_int, "address": addr_int, "address_hex": _as_hex(addr_int)}
 
 def _writes_enabled() -> bool:
     return _signer_credentials() is not None
@@ -146,7 +142,7 @@ def _account_address_hex() -> str | None:
     creds = _signer_credentials()
     return creds.get("address_hex") if creds else None
 
-
+# -------------------- starknet helpers --------------------
 async def _get_storage_value(addr_hex: str, key: int) -> int:
     cli = _rpc_client()
     contract_address = _h(addr_hex)
@@ -156,6 +152,11 @@ async def _get_storage_value(addr_hex: str, key: int) -> int:
         )
     except TypeError:
         value = await cli.get_storage_at(contract_address=contract_address, key=key)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"get_storage_at failed: {type(exc).__name__}: {exc!r}"
+        ) from exc
 
     if isinstance(value, int):
         return value
@@ -164,9 +165,23 @@ async def _get_storage_value(addr_hex: str, key: int) -> int:
     raise HTTPException(status_code=502, detail="Unsupported storage value type")
 
 
+async def _read(addr_hex: str, fn: str, calldata: list[int]) -> list[int]:
+    cli = _rpc_client()
+    call = Call(to_addr=_h(addr_hex), selector=get_selector_from_name(fn), calldata=calldata)
+    try:
+        return await cli.call_contract(call=call, block_id="latest")
+    except TypeError:
+        return await cli.call_contract(call=call)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"call_contract failed: {type(exc).__name__}: {exc!r}"
+        ) from exc
+
+
+
 async def _read_free_quota(addr_hex: str) -> int:
     return await _get_storage_value(addr_hex, _FREE_QUOTA_KEY)
-
 
 async def _read_price_per_unit(addr_hex: str) -> int:
     low = await _get_storage_value(addr_hex, _PRICE_PER_UNIT_BASE_KEY)
@@ -185,13 +200,8 @@ async def _get_account() -> Account:
     async with _ACCOUNT_LOCK:
         if _ACCOUNT and _ACCOUNT.address == creds["address"]:
             return _ACCOUNT
-
         client = _rpc_client()
-        try:
-            chain_id = await client.get_chain_id()
-        except Exception as exc:  # pragma: no cover - network failure
-            raise HTTPException(status_code=502, detail=f"Failed to fetch chain id: {exc}") from exc
-
+        chain_id = await client.get_chain_id()
         key_pair = KeyPair.from_private_key(creds["private_key"])
         _ACCOUNT = Account(client=client, address=creds["address"], key_pair=key_pair, chain=chain_id)
         return _ACCOUNT
@@ -205,7 +215,7 @@ def _tokens_to_wei(amount: Decimal, decimals: int = DECIMALS) -> int:
                 status_code=400,
                 detail=f"Amount has more precision than supported ({decimals} decimals)",
             )
-    except InvalidOperation as exc:  # pragma: no cover - invalid decimal arithmetic
+    except InvalidOperation as exc:
         raise HTTPException(status_code=400, detail=f"Invalid decimal amount: {exc}") from exc
     return int(scaled)
 
@@ -216,51 +226,57 @@ async def _invoke(to_addr_hex: str, fn: str, calldata: list[int]) -> str:
         if hasattr(account, "execute_v3"):
             tx = await account.execute_v3(calls=[call], auto_estimate=True)
         else:
-            tx = await account.execute(calls=[call], auto_estimate=True)
-    except Exception as exc:  # pragma: no cover - provider/account failure
-        raise HTTPException(status_code=502, detail=f"Failed to submit transaction: {exc}") from exc
+            tx = await account.execute(calls=[call], version=3, auto_estimate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to submit transaction: {exc!r}") from exc
 
     tx_hash = getattr(tx, "hash", None) or getattr(tx, "transaction_hash", None)
-    if isinstance(tx_hash, int):
-        return hex(tx_hash)
-    return str(tx_hash)
-
-async def _read(addr_hex: str, fn: str, calldata: list[int]) -> list[int]:
-    cli = _rpc_client()
-    call = Call(to_addr=_h(addr_hex), selector=get_selector_from_name(fn), calldata=calldata)
-    try:
-        return await cli.call_contract(call=call, block_number="latest")
-    except TypeError:
-        return await cli.call_contract(call=call)
+    return hex(tx_hash) if isinstance(tx_hash, int) else str(tx_hash)
 
 def _require_env_addr(v: str, name: str) -> str:
     if not v:
         raise HTTPException(status_code=400, detail=f"{name} not configured")
     return v
 
+# -------------------- FastAPI --------------------
+
 app = FastAPI(title="tokenxllm backend", version="0.2.0")
+# Para que el frontend (Vite 5173) funcione seguro ahora:
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5500", "http://127.0.0.1:5500", "null", "*"],
+    allow_origins=["http://localhost:5173"],  # solo el frontend vite
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    allow_credentials=False,
 )
 
 class ApproveRequest(BaseModel):
     amount: Decimal = Field(..., gt=0)
     spender: str | None = None
 
-
 class AuthorizeRequest(BaseModel):
     units: int = Field(..., gt=0)
-
 
 class MintRequest(BaseModel):
     to: str = Field(..., min_length=1)
     amount: Decimal = Field(..., gt=0)
+class SendRequest(BaseModel):
+    to: str
+    amount: Decimal  # en AIC
+class AirdropRequest(BaseModel):
+    to: str
+    amount: Decimal  # en AIC (con DECIMALS)    
 
-
+@app.post("/airdrop")
+async def airdrop(body: AirdropRequest):
+    aic = _require_env_addr(AIC_ADDR_H, "AIC_ADDR")
+    # convierte a u256 (wei con DECIMALS)
+    amount_wei = _tokens_to_wei(body.amount, DECIMALS)
+    lo, hi = _to_u256(amount_wei)
+    # si sos owner, esto pasa; si no, revierte con 'OWNER'
+    tx_hash = await _invoke(aic, "mint", [_h(body.to), lo, hi])
+    return {"tx_hash": tx_hash}
+  
 @app.get("/health")
 async def health():
     return {"ok": True}
@@ -302,24 +318,16 @@ async def free_quota(user: str | None = None):
     total = await _read_free_quota(um)
     price = await _read_price_per_unit(um)
 
-    response: dict[str, Any] = {
+    resp: dict[str, Any] = {
         "free_quota": int(total),
         "price_per_unit_wei": str(price),
     }
-
     if user:
         (used_val,) = (await _read(um, "used_in_current_epoch", [_h(user)]) + [0])[:1]
         used_units = int(used_val)
         remaining = max(int(total) - used_units, 0)
-        response.update(
-            {
-                "user": user,
-                "used_units": used_units,
-                "free_remaining": remaining,
-            }
-        )
-
-    return response
+        resp.update({"user": user, "used_units": used_units, "free_remaining": remaining})
+    return resp
 
 @app.get("/epoch")
 async def epoch():
@@ -327,28 +335,34 @@ async def epoch():
     (val,) = (await _read(um, "get_epoch_id", []) + [0])[:1]
     return {"epoch_id": int(val)}
 
-
 @app.post("/approve")
 async def approve(body: ApproveRequest):
     aic = _require_env_addr(AIC_ADDR_H, "AIC_ADDR")
     spender_hex = body.spender or _require_env_addr(UM_ADDR_H, "UM_ADDR")
     amount_wei = _tokens_to_wei(body.amount, DECIMALS)
-    low, high = _to_u256(amount_wei)
-    tx_hash = await _invoke(aic, "approve", [_h(spender_hex), low, high])
+    lo, hi = _to_u256(amount_wei)
+    tx_hash = await _invoke(aic, "approve", [_h(spender_hex), lo, hi])
     return {"tx_hash": tx_hash}
-
 
 @app.post("/authorize")
 async def authorize(body: AuthorizeRequest):
     um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
-    tx_hash = await _invoke(um, "authorize_usage", [int(body.units)])
-    return {"tx_hash": tx_hash}
+    units = int(body.units)
+    # primero intentá felt
+    try:
+        return {"tx_hash": await _invoke(um, "authorize_usage", [units])}
+    except HTTPException as e:
+        # si fue ENTRYPOINT o calldata mismatch, probá u256
+        if "ENTRYPOINT" in str(e.detail) or "calldata" in str(e.detail) or "invalid" in str(e.detail).lower():
+            lo, hi = _to_u256(units)
+            return {"tx_hash": await _invoke(um, "authorize_usage", [lo, hi])}
+        raise
 
 
 @app.post("/mint")
 async def mint(body: MintRequest):
     aic = _require_env_addr(AIC_ADDR_H, "AIC_ADDR")
     amount_wei = _tokens_to_wei(body.amount, DECIMALS)
-    low, high = _to_u256(amount_wei)
-    tx_hash = await _invoke(aic, "mint", [_h(body.to), low, high])
+    lo, hi = _to_u256(amount_wei)
+    tx_hash = await _invoke(aic, "mint", [_h(body.to), lo, hi])
     return {"tx_hash": tx_hash}

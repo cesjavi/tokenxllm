@@ -137,7 +137,7 @@ async def invoke(account: Account, to_addr_hex: str, fn: str, calldata: list[int
     if hasattr(account, "execute_v3"):
         tx = await account.execute_v3(calls=[call], auto_estimate=True)
     else:
-        tx = await account.execute(calls=[call], auto_estimate=True)
+        tx = await account.execute(calls=[call], version=3,auto_estimate=True)
     await account.client.wait_for_tx(tx.transaction_hash)
     return tx.transaction_hash
 
