@@ -72,6 +72,28 @@
         </div>
       </section>
 
+      <section class="card card-free-demo">
+        <h2>Demo gasto gratis</h2>
+        <div class="free-demo-grid">
+          <div class="free-demo-controls">
+            <button id="btnConnectWallet" type="button">Conectar billetera</button>
+            <label for="freeSpendUnits">Unidades a gastar</label>
+            <input id="freeSpendUnits" type="number" min="1" step="1" />
+            <button id="btnSpendFree" type="button">Gastar gratis</button>
+          </div>
+          <div class="free-demo-stats">
+            <div class="stat-card">
+              <span class="stat-label">Cuota gratuita disponible</span>
+              <span class="stat-value" id="freeQuotaInfo">Sin datos</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-label">Unidades pagadas / costo estimado</span>
+              <span class="stat-value" id="paidUsageInfo">0 / 0 AIC</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="card">
         <h2>Actions</h2>
         <div class="grid">

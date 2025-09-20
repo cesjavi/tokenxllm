@@ -19,6 +19,7 @@ except Exception:
 from starknet_py.net.account.account import Account  # type: ignore
 from starknet_py.net.signer.stark_curve_signer import KeyPair  # type: ignore
 from starknet_py.hash.selector import get_selector_from_name  # type: ignore
+from starknet_py.hash.storage import get_storage_var_address  # type: ignore
 
 load_dotenv()
 
@@ -33,6 +34,9 @@ DEFAULT_ACCOUNTS_FILE = os.path.expanduser("~/.starknet_accounts/starknet_open_z
 _RPC_CLIENT: FullNodeClient | None = None
 _ACCOUNT: Account | None = None
 _ACCOUNT_LOCK = asyncio.Lock()
+
+_FREE_QUOTA_KEY = get_storage_var_address("UsageManager_free_quota_per_epoch")
+_PRICE_PER_UNIT_BASE_KEY = get_storage_var_address("UsageManager_price_per_unit_wei")
 
 def _h(x: str | int) -> int:
     if isinstance(x, int):
@@ -141,6 +145,33 @@ def _writes_enabled() -> bool:
 def _account_address_hex() -> str | None:
     creds = _signer_credentials()
     return creds.get("address_hex") if creds else None
+
+
+async def _get_storage_value(addr_hex: str, key: int) -> int:
+    cli = _rpc_client()
+    contract_address = _h(addr_hex)
+    try:
+        value = await cli.get_storage_at(
+            contract_address=contract_address, key=key, block_number="latest"
+        )
+    except TypeError:
+        value = await cli.get_storage_at(contract_address=contract_address, key=key)
+
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        return _h(value)
+    raise HTTPException(status_code=502, detail="Unsupported storage value type")
+
+
+async def _read_free_quota(addr_hex: str) -> int:
+    return await _get_storage_value(addr_hex, _FREE_QUOTA_KEY)
+
+
+async def _read_price_per_unit(addr_hex: str) -> int:
+    low = await _get_storage_value(addr_hex, _PRICE_PER_UNIT_BASE_KEY)
+    high = await _get_storage_value(addr_hex, _PRICE_PER_UNIT_BASE_KEY + 1)
+    return _from_u256(low, high)
 
 async def _get_account() -> Account:
     creds = _signer_credentials()
@@ -264,6 +295,31 @@ async def used(user: str):
     um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
     (val,) = (await _read(um, "used_in_current_epoch", [_h(user)]) + [0])[:1]
     return {"used_units": int(val)}
+
+@app.get("/free_quota")
+async def free_quota(user: str | None = None):
+    um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
+    total = await _read_free_quota(um)
+    price = await _read_price_per_unit(um)
+
+    response: dict[str, Any] = {
+        "free_quota": int(total),
+        "price_per_unit_wei": str(price),
+    }
+
+    if user:
+        (used_val,) = (await _read(um, "used_in_current_epoch", [_h(user)]) + [0])[:1]
+        used_units = int(used_val)
+        remaining = max(int(total) - used_units, 0)
+        response.update(
+            {
+                "user": user,
+                "used_units": used_units,
+                "free_remaining": remaining,
+            }
+        )
+
+    return response
 
 @app.get("/epoch")
 async def epoch():
