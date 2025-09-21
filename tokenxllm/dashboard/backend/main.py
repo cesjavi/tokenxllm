@@ -258,6 +258,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+class SetFreeQuotaBody(BaseModel):
+    new_quota: int  # u64 en Cairo
+
+class SetPriceBody(BaseModel):
+    price_AIC: Decimal = Field(..., gt=0)  # precio por unidad en AIC
 
 class ApproveRequest(BaseModel):
     amount: Decimal = Field(..., gt=0)
@@ -275,6 +280,23 @@ class SendRequest(BaseModel):
 class AirdropRequest(BaseModel):
     to: str
     amount: Decimal  # en AIC (con DECIMALS)    
+
+@app.post("/set_free_quota")
+async def set_free_quota(body: SetFreeQuotaBody):
+    um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
+    q = int(body.new_quota)
+    if q < 0 or q > 2**64 - 1:
+        raise HTTPException(status_code=400, detail="new_quota fuera de rango u64")
+    tx_hash = await _invoke(um, "set_free_quota_per_epoch", [q])
+    return {"tx_hash": tx_hash, "new_quota": q}
+
+@app.post("/set_price")
+async def set_price(body: SetPriceBody):
+    um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
+    amount_wei = _tokens_to_wei(body.price_AIC, DECIMALS)  # p.ej. 0.01 -> 10^16 si 18 dec
+    lo, hi = _to_u256(amount_wei)
+    tx_hash = await _invoke(um, "set_price_per_unit_wei", [lo, hi])
+    return {"tx_hash": tx_hash, "price_wei": str(amount_wei)}
 
 @app.post("/airdrop")
 async def airdrop(body: AirdropRequest):

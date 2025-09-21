@@ -73,6 +73,16 @@ mod UsageManager {
         self.user_used_in_epoch.read((user, eid))
     }
 
+    #[external(v0)]
+    fn get_free_quota_per_epoch(ref self: ContractState) -> u64 {
+        self.free_quota_per_epoch.read()
+    }
+
+    #[external(v0)]
+    fn get_price_per_unit_wei(ref self: ContractState) -> u256 {
+        self.price_per_unit_wei.read()
+    }
+
     // ------- Lógica principal -------
     #[external(v0)]
     fn authorize_usage(ref self: ContractState, units: u64) {

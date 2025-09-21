@@ -8,9 +8,9 @@ edition = "2024_07"
 [dependencies]
 starknet = "2.12.2"
 
-[dev-dependencies]
-snforge_std = "0.49.0"
-assert_macros = "2.12.2"
+#[dev-dependencies]
+#snforge_std = "0.49.0"
+#assert_macros = "2.12.2"
 
 [[target.starknet-contract]]
 sierra = true
