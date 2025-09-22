@@ -112,6 +112,12 @@ def _load_from_accounts_file() -> tuple[str | None, str | None]:
     result = find_account(data)
     return result if result else (None, None)
 
+
+def _split_env_list(value: str | None) -> list[str]:
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item.strip()]
+
 @lru_cache(maxsize=1)
 def _signer_credentials() -> dict[str, Any] | None:
     priv = _clean_str(os.getenv("PRIVATE_KEY"))
@@ -249,11 +255,16 @@ def _require_env_addr(v: str, name: str) -> str:
 
 # -------------------- FastAPI --------------------
 
+_ALLOWED_ORIGINS = ["http://localhost:5173"]
+for origin in _split_env_list(os.getenv("DASHBOARD_PUBLIC_URL")):
+    if origin not in _ALLOWED_ORIGINS:
+        _ALLOWED_ORIGINS.append(origin)
+
 app = FastAPI(title="tokenxllm backend", version="0.2.0")
-# Para que el frontend (Vite 5173) funcione seguro ahora:
+# Permitir localhost (Vite 5173) y los orígenes configurados en DASHBOARD_PUBLIC_URL
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # solo el frontend vite
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
