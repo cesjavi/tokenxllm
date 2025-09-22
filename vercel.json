@@ -1,0 +1,8 @@
+{
+  "functions": {
+    "api/backend.py": {
+      "runtime": "vercel-python@3"
+    }
+  },
+  "installCommand": "pip install -r tokenxllm/tokenxllm/dashboard/backend/requirements.txt"
+}
