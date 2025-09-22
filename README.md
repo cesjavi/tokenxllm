@@ -178,6 +178,8 @@ RPC_URL=https://starknet-sepolia.public.blastapi.io/rpc/v0_9
 AIC_ADDR=0x06ddaf09636ceb526485c55b93c48c70f2a1728ad223743aaf08c21362ae7d9e
 UM_ADDR=0x04515dc0c7ccb8c2816cd95ca16db10eb3c8071dafea05414fd078c4dc41473a
 AIC_DECIMALS=18
+# Opcional: lista separada por comas de orígenes permitidos además de localhost
+DASHBOARD_PUBLIC_URL=https://tu-dashboard.vercel.app
 # Para habilitar botones de escritura (approve/authorize/mint):
 ACCOUNT_ADDRESS=0x522570db5197d282febafea3538ff2deacfaf49ec85a86e30bbe45af6f7c90
 PRIVATE_KEY=0x<tu_privada_hex>
@@ -248,6 +250,8 @@ Class not declared al deploy
 No expongas el backend con writes_enabled=true a internet.
 
 Limitá CORS (allow_origins) a tu dominio.
+
+Si desplegás el backend en Vercel, agregá en **Settings → Environment Variables** una variable `DASHBOARD_PUBLIC_URL` con el dominio público de tu frontend (por ejemplo `https://tu-dashboard.vercel.app`). También podés listar varios orígenes separados por comas si necesitás más de un dominio.
 
 Considerá .env fuera del repo y rotación periódica de claves.
 
