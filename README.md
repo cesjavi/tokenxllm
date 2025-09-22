@@ -183,12 +183,24 @@ DASHBOARD_PUBLIC_URL=https://tu-dashboard.vercel.app
 # Para habilitar botones de escritura (approve/authorize/mint):
 ACCOUNT_ADDRESS=0x522570db5197d282febafea3538ff2deacfaf49ec85a86e30bbe45af6f7c90
 PRIVATE_KEY=0x<tu_privada_hex>
+# Faucet opcional
+FAUCET_ENABLED=true
+FAUCET_AMOUNT_AIC=50
+FAUCET_COOLDOWN_SECONDS=86400
 EOF
 
 uvicorn main:app --host 0.0.0.0 --port 8000
 
 
 Tip: si no ponés ACCOUNT_ADDRESS/PRIVATE_KEY, writes_enabled=false y el front puede deshabilitar acciones que firman.
+
+Si habilitás el faucet:
+
+- La cuenta configurada en ACCOUNT_ADDRESS/PRIVATE_KEY debe ser la dueña del AIC para poder mintear.
+- Enviá algo de ETH de Sepolia a esa cuenta para cubrir fees.
+- Los parámetros se leen en `/faucet` (GET) y el reclamo se hace con `POST /faucet` enviando `{ "to": "0x..." }`.
+- El backend aplica un cooldown por address basado en `FAUCET_COOLDOWN_SECONDS`.
+- El endpoint `/config` incluye un bloque `faucet` con esta información para el dashboard.
 
 10) Dashboard – Frontend
 
@@ -197,6 +209,8 @@ Desde Windows o Ubuntu (en carpeta dashboard/frontend):
 # Servir el HTML por HTTP (evita “TypeError: Failed to fetch” del esquema file://)
 cd dashboard/frontend
 python3 -m http.server 5500
+
+En el dashboard verás una tarjeta "Faucet" con el estado actual, el monto por reclamo y el cooldown restante para la dirección ingresada. El botón "Reclamar faucet" usa el backend para mintear el monto configurado (si el faucet está habilitado y no estás en cooldown).
 
 
 Abrí en el navegador:

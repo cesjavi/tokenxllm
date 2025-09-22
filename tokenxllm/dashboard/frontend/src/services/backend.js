@@ -71,3 +71,15 @@ export function mint(to, amount) {
     body: JSON.stringify({ to, amount }),
   });
 }
+
+export function getFaucetInfo(address) {
+  const query = address ? `?address=${encodeURIComponent(address)}` : "";
+  return request(`/faucet${query}`);
+}
+
+export function requestFaucet(address) {
+  return request(`/faucet`, {
+    method: "POST",
+    body: JSON.stringify({ to: address }),
+  });
+}

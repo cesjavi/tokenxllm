@@ -7,8 +7,10 @@ import {
   getBalance,
   getEpoch,
   getFreeQuota,
+  getFaucetInfo,
   getUsedUnits,
   mint,
+  requestFaucet,
 } from "./services/backend.js";
 import { connectWallet, getProvider } from "./clients/starknet.js";
 
@@ -33,8 +35,24 @@ const paidConsumption = {
 
 let latestPricePerUnitWei = null;
 
+const faucetState = {
+  backendEnabled: false,
+  writesEnabled: false,
+  amountAIC: "",
+  amountWei: "",
+  cooldownSeconds: null,
+  secondsRemaining: null,
+  lastClaimTimestamp: null,
+  message: "",
+  error: "",
+};
+
 function byId(id) {
   return document.getElementById(id);
+}
+
+function hasOwn(obj, prop) {
+  return Object.prototype.hasOwnProperty.call(obj, prop);
 }
 
 function setText(id, value) {
@@ -169,6 +187,42 @@ function formatWeiAmount(wei) {
   }
 }
 
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return "N/D";
+  }
+  const totalSeconds = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  const parts = [];
+  if (hours) {
+    parts.push(`${hours}h`);
+  }
+  if (minutes) {
+    parts.push(`${minutes}m`);
+  }
+  if (parts.length === 0 || secs) {
+    parts.push(`${secs}s`);
+  }
+  return parts.join(" ");
+}
+
+function formatTimestamp(ts) {
+  if (!Number.isFinite(ts) || ts <= 0) {
+    return "Sin datos";
+  }
+  try {
+    const date = new Date(Number(ts) * 1000);
+    if (Number.isNaN(date.getTime())) {
+      return "Sin datos";
+    }
+    return date.toLocaleString();
+  } catch (error) {
+    return "Sin datos";
+  }
+}
+
 function updateFreeQuotaDisplay() {
   const element = byId("freeQuotaInfo");
   if (!element) {
@@ -208,6 +262,142 @@ function updatePaidUsageDisplay() {
   element.textContent = `${unitsText} / ${costText}`;
 }
 
+function faucetIsUsable() {
+  const cooldownActive = faucetState.secondsRemaining !== null && faucetState.secondsRemaining > 0;
+  return writesEnabled && faucetState.backendEnabled && faucetState.writesEnabled && !cooldownActive;
+}
+
+function setFaucetMessage(message) {
+  faucetState.message = message || "";
+  faucetState.error = "";
+  updateFaucetDisplay();
+}
+
+function setFaucetError(message) {
+  faucetState.error = message || "";
+  updateFaucetDisplay();
+}
+
+function applyFaucetInfo(info) {
+  if (!info || typeof info !== "object") {
+    return;
+  }
+
+  if (hasOwn(info, "enabled")) {
+    faucetState.backendEnabled = Boolean(info.enabled);
+  }
+  if (hasOwn(info, "writes_enabled")) {
+    faucetState.writesEnabled = Boolean(info.writes_enabled);
+  }
+  if (hasOwn(info, "amount_AIC") && info.amount_AIC !== undefined && info.amount_AIC !== null) {
+    faucetState.amountAIC = String(info.amount_AIC);
+  }
+  if (hasOwn(info, "amount_wei") && info.amount_wei !== undefined && info.amount_wei !== null) {
+    faucetState.amountWei = String(info.amount_wei);
+  }
+  if (hasOwn(info, "cooldown_seconds")) {
+    const raw = Number(info.cooldown_seconds);
+    faucetState.cooldownSeconds = Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : null;
+  }
+  if (hasOwn(info, "seconds_remaining")) {
+    const value = info.seconds_remaining;
+    if (value === null || value === undefined) {
+      faucetState.secondsRemaining = null;
+    } else {
+      const parsed = Number(value);
+      faucetState.secondsRemaining = Number.isFinite(parsed) ? Math.max(0, Math.trunc(parsed)) : null;
+    }
+  }
+  if (hasOwn(info, "last_claim_timestamp")) {
+    const value = info.last_claim_timestamp;
+    if (value === null || value === undefined) {
+      faucetState.lastClaimTimestamp = null;
+    } else {
+      const parsed = Number(value);
+      faucetState.lastClaimTimestamp = Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+  }
+
+  updateFaucetDisplay();
+}
+
+function updateFaucetDisplay() {
+  const statusElement = byId("faucetEnabled");
+  if (statusElement) {
+    let statusText;
+    if (!faucetState.backendEnabled) {
+      statusText = "Deshabilitado";
+    } else if (!writesEnabled) {
+      statusText = "Sin credenciales";
+    } else if (!faucetState.writesEnabled) {
+      statusText = "Falta configurar";
+    } else {
+      statusText = faucetState.secondsRemaining && faucetState.secondsRemaining > 0 ? "En cooldown" : "Disponible";
+    }
+    statusElement.textContent = statusText;
+  }
+
+  const amountText = faucetState.amountAIC ? `${faucetState.amountAIC} AIC` : "N/D";
+  setText("faucetAmount", amountText);
+
+  const cooldownText = faucetState.cooldownSeconds === null ? "N/D" : formatDuration(faucetState.cooldownSeconds);
+  setText("faucetCooldown", cooldownText);
+
+  let remainingText;
+  if (faucetState.secondsRemaining === null) {
+    remainingText = faucetState.backendEnabled ? "Desconocido" : "N/D";
+  } else if (faucetState.secondsRemaining <= 0) {
+    remainingText = "Disponible";
+  } else {
+    remainingText = formatDuration(faucetState.secondsRemaining);
+  }
+  setText("faucetRemaining", remainingText);
+
+  setText("faucetLastClaim", formatTimestamp(faucetState.lastClaimTimestamp));
+
+  const statusLog = byId("faucetStatus");
+  if (statusLog) {
+    const message = faucetState.error ? `Error: ${faucetState.error}` : faucetState.message;
+    statusLog.textContent = message || "";
+  }
+
+  const button = byId("btnFaucet");
+  if (button) {
+    const cooldownActive = faucetState.secondsRemaining !== null && faucetState.secondsRemaining > 0;
+    const usable = faucetIsUsable();
+    button.disabled = !usable;
+
+    if (!writesEnabled) {
+      button.setAttribute("title", "Backend writes are disabled");
+    } else if (!faucetState.backendEnabled) {
+      button.setAttribute("title", "El faucet está deshabilitado en el backend");
+    } else if (!faucetState.writesEnabled) {
+      button.setAttribute("title", "Configura las credenciales del faucet en el backend");
+    } else if (cooldownActive) {
+      button.setAttribute("title", "Debes esperar al cooldown del faucet");
+    } else {
+      button.removeAttribute("title");
+    }
+  }
+}
+
+async function refreshFaucetState(address) {
+  const target = (address ?? readValue("faucetAddress") ?? activeUserAddress ?? "").trim();
+
+  try {
+    const info = await getFaucetInfo(target || undefined);
+    if (faucetState.error) {
+      faucetState.error = "";
+    }
+    applyFaucetInfo(info);
+    return info;
+  } catch (error) {
+    const message = error?.message || String(error);
+    setFaucetError(message);
+    return null;
+  }
+}
+
 function resetPaidTracking() {
   paidConsumption.units = 0;
   paidConsumption.costWei = 0n;
@@ -216,6 +406,7 @@ function resetPaidTracking() {
 }
 
 function setActiveUserAddress(address) {
+  const previous = activeUserAddress;
   const normalized = (address || "").trim();
   if (normalized === activeUserAddress) {
     return;
@@ -226,6 +417,11 @@ function setActiveUserAddress(address) {
   freeQuotaState.remaining = null;
   resetPaidTracking();
   updateFreeQuotaDisplay();
+
+  const faucetInput = byId("faucetAddress");
+  if (faucetInput && (!faucetInput.value || faucetInput.value.trim() === previous)) {
+    faucetInput.value = normalized;
+  }
 }
 
 function applyFreeQuotaResponse(freeQuota, used) {
@@ -279,7 +475,7 @@ function displaySignerAddress(address) {
 
 function applyWriteAvailability(enabled) {
   writesEnabled = Boolean(enabled);
-  const buttons = ["btnApprove", "btnAuthorize", "btnMint", "btnSpendFree"]
+  const buttons = ["btnApprove", "btnAuthorize", "btnMint", "btnSpendFree", "btnFaucet"]
     .map((id) => byId(id))
     .filter(Boolean);
 
@@ -293,12 +489,16 @@ function applyWriteAvailability(enabled) {
   });
 
   setText("writesEnabled", writesEnabled ? "Yes" : "No");
+  updateFaucetDisplay();
 }
 
 function applyBackendConfig(config) {
   backendConfig = config ?? null;
   const signerAddress = backendConfig?.account_address || "";
   applyWriteAvailability(Boolean(backendConfig?.writes_enabled));
+  if (backendConfig?.faucet) {
+    applyFaucetInfo(backendConfig.faucet);
+  }
   displaySignerAddress(signerAddress);
 }
 
@@ -309,6 +509,12 @@ async function preloadBackendConfig() {
   } catch (error) {
     applyBackendConfig(null);
     console.warn("Failed to load backend config", error);
+  }
+
+  try {
+    await refreshFaucetState();
+  } catch (error) {
+    console.warn("Failed to refresh faucet info", error);
   }
 }
 
@@ -427,6 +633,7 @@ async function handleRefresh() {
     applyFreeQuotaResponse(freeQuota, used);
     setText("balance", formatBalanceResponse(balance));
     setText("usage", formatUsageResponse(used, epoch, freeQuota));
+    await refreshFaucetState(userAddress);
 
     if (appConfig.umAddress) {
       const allowance = await getAllowance(userAddress, appConfig.umAddress);
@@ -441,6 +648,7 @@ async function handleRefresh() {
     freeQuotaState.total = null;
     freeQuotaState.remaining = null;
     setText("freeQuotaInfo", String(error));
+    setFaucetError(String(error));
   }
 }
 
@@ -619,6 +827,50 @@ async function handleMint() {
   }
 }
 
+async function handleRequestFaucet() {
+  if (!ensureWritesAreEnabled()) {
+    return;
+  }
+
+  const addressInput = readValue("faucetAddress") || readValue("userAddr");
+  const address = addressInput.trim();
+
+  if (!address) {
+    alert("Ingresá una dirección para reclamar el faucet.");
+    return;
+  }
+
+  setFaucetMessage("Solicitando faucet...");
+
+  try {
+    const response = await requestFaucet(address);
+    setFaucetMessage(`Faucet tx: ${response.tx_hash}`);
+    await refreshFaucetState(address);
+  } catch (error) {
+    let message = error?.message || String(error);
+    try {
+      const parsed = JSON.parse(message);
+      const detail = parsed?.detail;
+      if (detail) {
+        if (typeof detail === "string") {
+          message = detail;
+        } else if (detail.error) {
+          const seconds = Number(detail.seconds_remaining);
+          const extra = Number.isFinite(seconds) ? ` (${formatDuration(seconds)} restantes)` : "";
+          message = `${detail.error}${extra}`;
+        } else {
+          message = JSON.stringify(detail);
+        }
+      }
+    } catch (parseError) {
+      // ignore malformed JSON
+    }
+
+    setFaucetError(message);
+    await refreshFaucetState(address);
+  }
+}
+
 function attachEventHandlers() {
   const configButton = byId("btnConfig");
   const refreshButton = byId("btnRefresh");
@@ -628,6 +880,8 @@ function attachEventHandlers() {
   const connectButton = byId("btnConnectWallet");
   const spendButton = byId("btnSpendFree");
   const userInput = byId("userAddr");
+  const faucetButton = byId("btnFaucet");
+  const faucetInput = byId("faucetAddress");
 
   configButton?.addEventListener("click", handleLoadConfig);
   refreshButton?.addEventListener("click", handleRefresh);
@@ -636,8 +890,12 @@ function attachEventHandlers() {
   approveButton?.addEventListener("click", handleApprove);
   authorizeButton?.addEventListener("click", handleAuthorize);
   mintButton?.addEventListener("click", handleMint);
+  faucetButton?.addEventListener("click", handleRequestFaucet);
   userInput?.addEventListener("change", () => {
     setActiveUserAddress(readValue("userAddr"));
+  });
+  faucetInput?.addEventListener("change", () => {
+    void refreshFaucetState(readValue("faucetAddress"));
   });
 }
 
@@ -646,6 +904,7 @@ function init() {
   configureFormDefaults();
   updateFreeQuotaDisplay();
   updatePaidUsageDisplay();
+  updateFaucetDisplay();
   exposeStarknetHelpers();
   attachEventHandlers();
   preloadBackendConfig();

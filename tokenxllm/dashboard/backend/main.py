@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import os
+import time
 from decimal import Decimal, InvalidOperation, getcontext
 from functools import lru_cache
 from typing import Any
@@ -29,17 +32,58 @@ AIC_ADDR_H = (os.getenv("AIC_ADDR") or "").strip()
 UM_ADDR_H  = (os.getenv("UM_ADDR")  or "").strip()
 DECIMALS   = int(os.getenv("AIC_DECIMALS", "18"))
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_decimal(name: str, default: Decimal) -> Decimal:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return Decimal(raw.strip())
+    except InvalidOperation:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
+FAUCET_ENABLED = _env_bool("FAUCET_ENABLED", False)
+FAUCET_AMOUNT_AIC = _env_decimal("FAUCET_AMOUNT_AIC", Decimal("50"))
+FAUCET_COOLDOWN_SECONDS = max(_env_int("FAUCET_COOLDOWN_SECONDS", 86_400), 0)
+
+
 DEFAULT_ACCOUNTS_FILE = os.path.expanduser("~/.starknet_accounts/starknet_open_zeppelin_accounts.json")
 
 _RPC_CLIENT: FullNodeClient | None = None
 _ACCOUNT: Account | None = None
 _ACCOUNT_LOCK = asyncio.Lock()
 
+_FAUCET_LAST_CLAIMS: dict[str, float] = {}
+_FAUCET_LOCK = asyncio.Lock()
+
 # Storage slots (compatibles con tu contrato original)
 _FREE_QUOTA_KEY = get_storage_var_address("UsageManager_free_quota_per_epoch")
 _PRICE_PER_UNIT_BASE_KEY = get_storage_var_address("UsageManager_price_per_unit_wei")
 
 # -------------------- utils --------------------
+
+
+def _current_timestamp() -> float:
+    return time.time()
+
 
 def _h(x: str | int) -> int:
     if isinstance(x, int):
@@ -234,6 +278,22 @@ def _wei_to_tokens_str(amount_wei: int, decimals: int = DECIMALS) -> str:
     decimal_value = Decimal(amount_wei) / scale
     return format(decimal_value, "f")
 
+
+def _format_decimal(amount: Decimal) -> str:
+    return format(amount, "f")
+
+
+def _safe_faucet_amount_wei() -> int:
+    try:
+        return _tokens_to_wei(FAUCET_AMOUNT_AIC, DECIMALS)
+    except HTTPException:
+        return 0
+
+
+def _normalize_faucet_key(value: str) -> str:
+    return value.strip().lower()
+
+
 async def _invoke(to_addr_hex: str, fn: str, calldata: list[int]) -> str:
     account = await _get_account()
     call = Call(to_addr=_h(to_addr_hex), selector=get_selector_from_name(fn), calldata=calldata)
@@ -252,6 +312,38 @@ def _require_env_addr(v: str, name: str) -> str:
     if not v:
         raise HTTPException(status_code=400, detail=f"{name} not configured")
     return v
+
+
+async def _build_faucet_info(address: str | None = None) -> FaucetInfo:
+    amount_wei = _safe_faucet_amount_wei()
+    cooldown_seconds = max(int(FAUCET_COOLDOWN_SECONDS), 0)
+    enabled = bool(FAUCET_ENABLED) and amount_wei > 0
+    writes_enabled = _writes_enabled()
+    seconds_remaining: int | None = None
+    last_claim_timestamp: int | None = None
+
+    if address:
+        normalized = _normalize_faucet_key(address)
+        async with _FAUCET_LOCK:
+            last_claim = _FAUCET_LAST_CLAIMS.get(normalized)
+        if last_claim is not None:
+            last_claim_timestamp = int(last_claim)
+            now = _current_timestamp()
+            remaining = cooldown_seconds - (now - last_claim)
+            if remaining > 0:
+                seconds_remaining = int(remaining)
+            else:
+                seconds_remaining = 0
+
+    return FaucetInfo(
+        enabled=enabled,
+        writes_enabled=writes_enabled,
+        amount_AIC=_format_decimal(FAUCET_AMOUNT_AIC),
+        amount_wei=str(amount_wei),
+        cooldown_seconds=cooldown_seconds,
+        seconds_remaining=seconds_remaining,
+        last_claim_timestamp=last_claim_timestamp,
+    )
 
 # -------------------- FastAPI --------------------
 
@@ -285,6 +377,20 @@ class AuthorizeRequest(BaseModel):
 class MintRequest(BaseModel):
     to: str = Field(..., min_length=1)
     amount: Decimal = Field(..., gt=0)
+
+
+class FaucetInfo(BaseModel):
+    enabled: bool
+    writes_enabled: bool
+    amount_AIC: str
+    amount_wei: str
+    cooldown_seconds: int
+    seconds_remaining: int | None = None
+    last_claim_timestamp: int | None = None
+
+
+class FaucetRequest(BaseModel):
+    to: str = Field(..., min_length=1)
 class SendRequest(BaseModel):
     to: str
     amount: Decimal  # en AIC
@@ -325,6 +431,7 @@ async def health():
 
 @app.get("/config")
 async def config():
+    faucet_info = await _build_faucet_info()
     return {
         "rpc_url": RPC_URL,
         "aic_addr": AIC_ADDR_H or None,
@@ -332,6 +439,7 @@ async def config():
         "decimals": DECIMALS,
         "writes_enabled": _writes_enabled(),
         "account_address": _account_address_hex(),
+        "faucet": faucet_info.model_dump(),
     }
 
 @app.get("/balance")
@@ -414,3 +522,63 @@ async def mint(body: MintRequest):
     lo, hi = _to_u256(amount_wei)
     tx_hash = await _invoke(aic, "mint", [_h(body.to), lo, hi])
     return {"tx_hash": tx_hash}
+
+
+@app.get("/faucet", response_model=FaucetInfo)
+async def faucet(address: str | None = None):
+    return await _build_faucet_info(address)
+
+
+@app.post("/faucet")
+async def faucet_request(body: FaucetRequest):
+    info = await _build_faucet_info(body.to)
+    if not info.enabled:
+        raise HTTPException(status_code=404, detail="Faucet is disabled")
+    if not info.writes_enabled:
+        raise HTTPException(status_code=400, detail="Writes are not configured on the backend")
+
+    aic = _require_env_addr(AIC_ADDR_H, "AIC_ADDR")
+    amount_wei = _safe_faucet_amount_wei()
+    if amount_wei <= 0:
+        raise HTTPException(status_code=400, detail="Faucet amount must be greater than zero")
+
+    cooldown_seconds = info.cooldown_seconds
+    now = _current_timestamp()
+    normalized = _normalize_faucet_key(body.to)
+    last_claim: float | None = None
+
+    async with _FAUCET_LOCK:
+        last_claim = _FAUCET_LAST_CLAIMS.get(normalized)
+        if last_claim is not None:
+            elapsed = now - last_claim
+            if elapsed < cooldown_seconds:
+                remaining = int(max(cooldown_seconds - elapsed, 0))
+                raise HTTPException(
+                    status_code=429,
+                    detail={
+                        "error": "Faucet cooldown active",
+                        "seconds_remaining": remaining,
+                    },
+                )
+        _FAUCET_LAST_CLAIMS[normalized] = now
+
+    try:
+        lo, hi = _to_u256(amount_wei)
+        tx_hash = await _invoke(aic, "mint", [_h(body.to), lo, hi])
+    except Exception:
+        async with _FAUCET_LOCK:
+            if last_claim is None:
+                if _FAUCET_LAST_CLAIMS.get(normalized) == now:
+                    _FAUCET_LAST_CLAIMS.pop(normalized, None)
+            else:
+                if _FAUCET_LAST_CLAIMS.get(normalized) == now:
+                    _FAUCET_LAST_CLAIMS[normalized] = last_claim
+        raise
+
+    return {
+        "tx_hash": tx_hash,
+        "amount_AIC": _format_decimal(FAUCET_AMOUNT_AIC),
+        "amount_wei": str(amount_wei),
+        "cooldown_seconds": cooldown_seconds,
+        "seconds_remaining": cooldown_seconds,
+    }

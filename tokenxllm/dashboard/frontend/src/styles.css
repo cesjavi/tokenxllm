@@ -156,6 +156,21 @@ pre {
   word-break: break-word;
 }
 
+.card-faucet .faucet-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.card-faucet .faucet-form {
+  margin-top: 8px;
+}
+
+.card-faucet pre {
+  margin-top: 12px;
+}
+
 @media (max-width: 800px) {
   .grid {
     grid-template-columns: 1fr;
