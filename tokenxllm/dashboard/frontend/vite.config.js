@@ -1,8 +1,14 @@
 import { defineConfig } from "vite";
 
-export default defineConfig({
+// vite.config.ts
+export default {
   server: {
-    host: true,
-    port: 5173
+    proxy: {
+      "/api": {
+        target: "http://localhost:8000",
+        changeOrigin: true
+      }
+    }
   }
-});
+};
+);
