@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 
-// vite.config.ts
-export default {
+export default defineConfig({
   server: {
     proxy: {
       "/api": {
@@ -10,5 +9,4 @@ export default {
       }
     }
   }
-};
-);
+});
