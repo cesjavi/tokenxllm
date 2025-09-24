@@ -1,8 +1,15 @@
 {
-  "buildCommand": "npm ci --prefix tokenxllm/dashboard/frontend && npm run build --prefix tokenxllm/dashboard/frontend",
-  "installCommand": "pip install -r requirements.txt",
-  "outputDirectory": "tokenxllm/dashboard/frontend/dist",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/$1" }
+  "version": 2,
+  "builds": [
+    {
+      "src": "tokenxllm/dashboard/frontend/package.json",
+      "use": "@vercel/static-build"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/$1"
+    }
   ]
 }
