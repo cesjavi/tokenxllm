@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
-# starknet_py
+# starknet_py xxx
 from starknet_py.net.full_node_client import FullNodeClient  # type: ignore
 try:
     from starknet_py.net.client_models import Call  # type: ignore
