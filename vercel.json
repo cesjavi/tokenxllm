@@ -1,11 +1,8 @@
 {
-{
-  "buildCommand": "npm ci --prefix tokenxllm/tokenxllm/dashboard/frontend && npm run build --prefix tokenxllm/tokenxllm/dashboard/frontend",
-  "outputDirectory": "tokenxllm/tokenxllm/dashboard/frontend/dist",
+  "buildCommand": "npm ci --prefix tokenxllm/dashboard/frontend && npm run build --prefix tokenxllm/dashboard/frontend",
+  "installCommand": "pip install -r requirements.txt",
+  "outputDirectory": "tokenxllm/dashboard/frontend/dist",
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/$1" }
   ]
-}
-
-  "installCommand": "pip install -r tokenxllm/tokenxllm/dashboard/backend/requirements.txt"
 }
