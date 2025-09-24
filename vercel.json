@@ -1,16 +1,8 @@
 {
-  "version": 2,
-  "builds": [
-    {
-      "src": "tokenxllm/dashboard/frontend/package.json",
-      "use": "@vercel/static-build",
-      "config": { "distDir": "dist" }
-    }
+  "buildCommand": "npm ci --prefix tokenxllm/tokenxllm/dashboard/frontend && npm run build --prefix tokenxllm/tokenxllm/dashboard/frontend",
+  "outputDirectory": "tokenxllm/tokenxllm/dashboard/frontend/dist",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" }
   ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" },
-
-    { "handle": "filesystem" },
-    { "src": "/.*", "dest": "/index.html" }
-  ]
+  "installCommand": "pip install -r tokenxllm/tokenxllm/dashboard/backend/requirements.txt"
 }
