@@ -1,9 +1,7 @@
 {
   "version": 2,
-  "functions": {
-    "main.py": {
-      "runtime": "@vercel/python@3.11.0"
-    }
+  "functions": {    
+      "runtime": "@vercel/python@3.11.0"    
   },
   "rewrites": [
     { "source": "/", "destination": "/api/health" },
