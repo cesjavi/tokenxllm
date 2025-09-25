@@ -8,6 +8,22 @@
   ],
   "routes": [
     {
+      "src": "/health",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/config",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/balance",
+      "dest": "/api/index.py"
+    },
+    {
+      "src": "/faucet",
+      "dest": "/api/index.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "/api/index.py"
     }
