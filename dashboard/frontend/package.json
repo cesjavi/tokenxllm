@@ -8,6 +8,10 @@
     "preview": "vite preview",
     "vercel-build": "vite build"
   },
+  "dependencies": {
+    "get-starknet": "^latest",
+    "starknet": "^latest"
+  },
   "devDependencies": {
     "vite": "^5.4.0"
   }
