@@ -43,3 +43,14 @@ npm run preview
 ```
 
 The `build` command outputs static assets to `dist/`. Use `npm run preview` to serve the production build locally.
+
+## Deploying to Vercel
+
+You can deploy the frontend as a static site:
+
+1. Create a new Vercel project using the `dashboard/frontend` folder as the root.
+2. Set the build command to `npm run build` and the output directory to `dist`.
+3. Define the environment variables that start with `VITE_` (at least `VITE_BACKEND_URL`, `VITE_RPC_URL`, `VITE_AIC_ADDR`, `VITE_UM_ADDR` and `VITE_DECIMALS`). Vercel will expose them at build time.
+4. Point `VITE_BACKEND_URL` to the URL where you host the FastAPI backend (local testing, another Vercel project, Railway, Render, etc.).
+
+> The frontend and backend must be deployed as separate projects. Once the backend is live, add its public URL to `VITE_BACKEND_URL` and trigger a new frontend build.

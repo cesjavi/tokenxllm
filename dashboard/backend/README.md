@@ -13,4 +13,13 @@ Run with uvicorn after filling .env (copy from .env.example).
 
 ### Deploying on Vercel
 
-If you host the backend on Vercel, add an Environment Variable named `DASHBOARD_PUBLIC_URL` with the public domain of your deployed frontend (e.g. `https://your-dashboard.vercel.app`). This ensures the backend accepts requests from the production dashboard while keeping CORS restrictions in place.
+The backend runs as a standalone FastAPI service. To host it on Vercel:
+
+1. Create a **separate** Vercel project from the `dashboard/backend` directory.
+2. Set the build command to `pip install -r requirements.txt` and the run command to `uvicorn main:app` (Vercel automatically wraps it as a serverless function).
+3. Add the environment variables listed above (at minimum `RPC_URL`, `AIC_ADDR`, `UM_ADDR`, `AIC_DECIMALS`).
+4. Define `DASHBOARD_PUBLIC_URL` with the public domain(s) of your frontend (comma separated if you have multiple). They will be appended to the CORS allow-list together with `http://localhost:5173` for local development.
+
+> Because the backend exposes private write operations when `ACCOUNT_ADDRESS`/`PRIVATE_KEY` are present, avoid committing those values. Configure them directly in the Vercel dashboard if you need to enable writes.
+
+Once the backend deployment succeeds, update the frontend environment variable `VITE_BACKEND_URL` so that the dashboard points to the newly created API.
