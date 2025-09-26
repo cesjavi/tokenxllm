@@ -18,7 +18,7 @@ const parsedDecimals = (() => {
 })();
 
 export const appConfig = {
-  backendUrl: sanitize(env.VITE_BACKEND_URL) || "",
+  backendUrl: sanitize(env.VITE_BACKEND_URL) || "/api",
   rpcUrl: sanitize(env.VITE_RPC_URL) || "",
   aicAddress: sanitize(env.VITE_AIC_ADDR) || "",
   umAddress: sanitize(env.VITE_UM_ADDR) || "",
