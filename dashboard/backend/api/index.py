@@ -161,9 +161,7 @@ def _split_env_list(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
-@app.get("/")
-async def root():
-    return {"message": "TokenXLLM Backend API", "version": "0.2.0", "status": "running"}
+
 @lru_cache(maxsize=1)
 def _signer_credentials() -> dict[str, Any] | None:
     priv = _clean_str(os.getenv("PRIVATE_KEY"))
@@ -399,7 +397,9 @@ class SendRequest(BaseModel):
 class AirdropRequest(BaseModel):
     to: str
     amount: Decimal  # en AIC (con DECIMALS)    
-
+@app.get("/")
+async def root():
+    return {"message": "TokenXLLM Backend API", "version": "0.2.0", "status": "running"}
 @app.post("/set_free_quota")
 async def set_free_quota(body: SetFreeQuotaBody):
     um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
