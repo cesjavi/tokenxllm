@@ -5,10 +5,7 @@ import { appConfig } from "../config.js";
 const BASE = ((appConfig?.backendUrl ?? "/api") + "").replace(/\/+$/, "");
 
 // Helper para armar URL con path seguro
-function joinUrl(path) {
-  const p = path.startsWith("/") ? path : `/${path}`;
-  return `${BASE}${p}`;
-}
+const joinUrl = (p) => `${BASE}${p.startsWith("/") ? p : `/${p}`}`;
 
 async function request(path, options = {}) {
   const url = joinUrl(path);
