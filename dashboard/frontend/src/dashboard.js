@@ -36,9 +36,9 @@ const paidConsumption = {
 let latestPricePerUnitWei = null;
 
 const faucetState = {
-  backendEnabled: false,
+  backendEnabled: true,
   writesEnabled: false,
-  amountAIC: "",
+  amountAIC: "50",
   amountWei: "",
   cooldownSeconds: null,
   secondsRemaining: null,
