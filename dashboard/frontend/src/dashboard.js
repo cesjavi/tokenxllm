@@ -37,7 +37,7 @@ let latestPricePerUnitWei = null;
 
 const faucetState = {
   backendEnabled: true,
-  writesEnabled: false,
+  writesEnabled: true,
   amountAIC: "50",
   amountWei: "",
   cooldownSeconds: null,
@@ -326,7 +326,7 @@ function updateFaucetDisplay() {
   if (statusElement) {
     let statusText;
     if (!faucetState.backendEnabled) {
-      statusText = "Deshabilitado";
+      statusText = "Deshabilitado" + (faucetState.backendEnabled === false ? " en backend" : "");
     } else if (!writesEnabled) {
       statusText = "Sin credenciales";
     } else if (!faucetState.writesEnabled) {

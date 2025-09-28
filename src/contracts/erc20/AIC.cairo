@@ -50,6 +50,16 @@ mod AIC {
     }
 
     #[external(v0)]
+    fn balanceOf(ref self: ContractState, account: ContractAddress) -> u256 {
+        self.balances.read(account)
+    }
+
+    #[external(v0)]
+    fn totalSupply(ref self: ContractState) -> u256 {
+        self.total_supply.read()
+    }
+
+    #[external(v0)]
     fn allowance(ref self: ContractState, owner: ContractAddress, spender: ContractAddress) -> u256 {
         self.allowances.read((owner, spender))
     }
