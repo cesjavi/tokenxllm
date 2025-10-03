@@ -40,6 +40,29 @@ cp -f target/release/tokenxllm.starknet_artifacts.json target/release/starknet_a
 # Ver nombres de contratos (deberían salir "AIC" y "UsageManager")
 jq -r '.contracts[] | .name' target/release/starknet_artifacts.json
 
+3.1) Scripts enumerados para Sepolia
+
+Si preferís un flujo guiado, en `scripts/sepolia` hay cinco scripts numerados que automatizan estos pasos sobre Sepolia. Se pueden correr luego de configurar `OWNER_ADDR` y, opcionalmente, `RPC_URL`, `AIC_NAME_HEX`, `TREASURY_ADDR`, etc. (por defecto se usan los valores del ejemplo).
+
+```
+# 1) Compilar artefactos
+./scripts/sepolia/01_compile.sh
+
+# 2) Declarar AIC y guardar el class hash en scripts/sepolia/.cache
+./scripts/sepolia/02_declare_aic.sh
+
+# 3) Desplegar AIC y actualizar dashboard/backend/.env con AIC_ADDR
+./scripts/sepolia/03_deploy_aic.sh
+
+# 4) Declarar UsageManager
+./scripts/sepolia/04_declare_usage_manager.sh
+
+# 5) Desplegar UsageManager y actualizar dashboard/backend/.env con UM_ADDR
+./scripts/sepolia/05_deploy_usage_manager.sh
+```
+
+Cada script valida las dependencias (`scarb`, `sncast`, `jq`), usa `~/.starknet_accounts/...` por defecto y reutiliza `dashboard/backend/.env` si ya definiste `RPC_URL` o direcciones previas.
+
 4) Variables útiles (Sepolia)
 export RPC_URL="https://starknet-sepolia.public.blastapi.io/rpc/v0_9"
 
@@ -198,6 +221,13 @@ Si habilitás el faucet:
 
 - La cuenta configurada en ACCOUNT_ADDRESS/PRIVATE_KEY debe ser la dueña del AIC para poder mintear.
 - Enviá algo de ETH de Sepolia a esa cuenta para cubrir fees.
+
+10) Despliegue del dashboard
+
+- **Frontend (Vercel estático)**: usa el directorio `dashboard/frontend` como raíz del proyecto. Configurá `npm run build` como comando de build y `dist` como output. Cargá las variables `VITE_*` (en especial `VITE_BACKEND_URL`) desde el panel de Vercel para que el bundle conozca dónde vive el backend.
+- **Backend (Vercel Python o servicio equivalente)**: se despliega por separado con `dashboard/backend` como proyecto FastAPI. Instalá dependencias con `pip install -r requirements.txt`, ejecutá `uvicorn main:app` y definí en Vercel las variables `RPC_URL`, `AIC_ADDR`, `UM_ADDR`, `AIC_DECIMALS` y `DASHBOARD_PUBLIC_URL` (dominio público del frontend). Esto mantiene el CORS limitado al dashboard y a `http://localhost:5173`.
+
+> Podés alojar el backend en cualquier otro proveedor (Railway, Render, un VPS). Sólo asegurate de actualizar `VITE_BACKEND_URL` en el frontend para apuntar al dominio correcto.
 - Los parámetros se leen en `/faucet` (GET) y el reclamo se hace con `POST /faucet` enviando `{ "to": "0x..." }`.
 - El backend aplica un cooldown por address basado en `FAUCET_COOLDOWN_SECONDS`.
 - El endpoint `/config` incluye un bloque `faucet` con esta información para el dashboard.
