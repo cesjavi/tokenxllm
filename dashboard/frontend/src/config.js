@@ -18,15 +18,19 @@ const parsedDecimals = (() => {
 })();
 
 export const appConfig = {
-  backendUrl: sanitize(env.VITE_BACKEND_URL) || "",
-  rpcUrl: sanitize(env.VITE_RPC_URL) || "",
-  aicAddress: sanitize(env.VITE_AIC_ADDR) || "",
-  umAddress: sanitize(env.VITE_UM_ADDR) || "",
-  decimals: parsedDecimals ?? 18,
+  // Forzamos relativo para que pase por el proxy de Vercel
+  backendUrl: '/api',
+  rpcUrl: import.meta.env.VITE_RPC_URL || '',
+  aicAddress: import.meta.env.VITE_AIC_ADDRESS || '',
+  umAddress: import.meta.env.VITE_UM_ADDRESS || '',
+  decimals: Number(import.meta.env.VITE_DECIMALS ?? 18),
 };
 
+// Acepta absoluta (http/https) o relativa que empiece con "/"
 export function assertBackendConfigured() {
-  if (!appConfig.backendUrl) {
-    throw new Error("VITE_BACKEND_URL is not configured");
+  const u = appConfig.backendUrl;
+  if (!u) throw new Error('backendUrl not configured');
+  if (!/^https?:\/\//i.test(u) && !u.startsWith('/')) {
+    throw new Error('backendUrl must be absolute (http...) or start with "/"');
   }
 }
