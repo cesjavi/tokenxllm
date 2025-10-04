@@ -40,6 +40,29 @@ cp -f target/release/tokenxllm.starknet_artifacts.json target/release/starknet_a
 # Ver nombres de contratos (deberían salir "AIC" y "UsageManager")
 jq -r '.contracts[] | .name' target/release/starknet_artifacts.json
 
+3.1) Scripts enumerados para Sepolia
+
+Si preferís un flujo guiado, en `scripts/sepolia` hay cinco scripts numerados que automatizan estos pasos sobre Sepolia. Se pueden correr luego de configurar `OWNER_ADDR` y, opcionalmente, `RPC_URL`, `AIC_NAME_HEX`, `TREASURY_ADDR`, etc. (por defecto se usan los valores del ejemplo).
+
+```
+# 1) Compilar artefactos
+./scripts/sepolia/01_compile.sh
+
+# 2) Declarar AIC y guardar el class hash en scripts/sepolia/.cache
+./scripts/sepolia/02_declare_aic.sh
+
+# 3) Desplegar AIC y actualizar dashboard/backend/.env con AIC_ADDR
+./scripts/sepolia/03_deploy_aic.sh
+
+# 4) Declarar UsageManager
+./scripts/sepolia/04_declare_usage_manager.sh
+
+# 5) Desplegar UsageManager y actualizar dashboard/backend/.env con UM_ADDR
+./scripts/sepolia/05_deploy_usage_manager.sh
+```
+
+Cada script valida las dependencias (`scarb`, `sncast`, `jq`), usa `~/.starknet_accounts/...` por defecto y reutiliza `dashboard/backend/.env` si ya definiste `RPC_URL` o direcciones previas.
+
 4) Variables útiles (Sepolia)
 export RPC_URL="https://starknet-sepolia.public.blastapi.io/rpc/v0_9"
 
