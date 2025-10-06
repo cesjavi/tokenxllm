@@ -9,155 +9,233 @@
   <body>
     <div class="wrap">
       <h1>TokenXLLM Dashboard</h1>
-      <section class="card">
-        <h2>Environment</h2>
-        <div class="env-grid">
-          <div>
-            <h3>Backend URL</h3>
-            <code id="backendUrl"></code>
-          </div>
-          <div>
-            <h3>RPC URL</h3>
-            <code id="rpcUrl"></code>
-          </div>
-          <div>
-            <h3>TokenXLlm Address</h3>
-            <code id="tokenXllmAddress"></code>
-            <code id="aicAddress"></code>
-          </div>
-          <div>
-            <h3>UM Address</h3>
-            <code id="umAddress"></code>
-          </div>
-          <div>
-            <h3>Decimals</h3>
-            <code id="decimals"></code>
-          </div>
-          <div>
-            <h3>Writes Enabled</h3>
-            <code id="writesEnabled"></code>
-          </div>
-          <div>
-            <h3>Signer Address</h3>
-            <code id="signerAddress"></code>
-          </div>
+      <div class="tab-container">
+        <div class="tab-bar" role="tablist">
+          <button
+            type="button"
+            class="tab-button is-active"
+            data-tab-target="overview"
+            role="tab"
+            aria-selected="true"
+          >
+            General
+          </button>
+          <button
+            type="button"
+            class="tab-button"
+            data-tab-target="usage"
+            role="tab"
+            aria-selected="false"
+            tabindex="-1"
+          >
+            Estadísticas de uso
+          </button>
         </div>
-        <button id="btnConfig">Load Config</button>
-        <pre id="config"></pre>
-      </section>
+        <div class="tab-panels">
+          <div class="tab-content is-active" data-tab-panel="overview">
+            <section class="card">
+              <h2>Environment</h2>
+              <div class="env-grid">
+                <div>
+                  <h3>Backend URL</h3>
+                  <code id="backendUrl"></code>
+                </div>
+                <div>
+                  <h3>RPC URL</h3>
+                  <code id="rpcUrl"></code>
+                </div>
+                <div>
+                  <h3>TokenXLlm Address</h3>
+                  <code id="tokenXllmAddress"></code>
+                  <code id="aicAddress"></code>
+                </div>
+                <div>
+                  <h3>UM Address</h3>
+                  <code id="umAddress"></code>
+                </div>
+                <div>
+                  <h3>Decimals</h3>
+                  <code id="decimals"></code>
+                </div>
+                <div>
+                  <h3>Writes Enabled</h3>
+                  <code id="writesEnabled"></code>
+                </div>
+                <div>
+                  <h3>Signer Address</h3>
+                  <code id="signerAddress"></code>
+                </div>
+              </div>
+              <button id="btnConfig">Load Config</button>
+              <pre id="config"></pre>
+            </section>
 
-      <section class="card">
-        <h2>Monitor</h2>
-        <div class="grid">
-          <div>
-            <label>Your Address</label>
-            <input id="userAddr" placeholder="0x..." />
-          </div>
-          <div class="actions">
-            <button id="btnRefresh">Refresh</button>
-          </div>
-        </div>
-        <div class="row">
-          <div class="box">
-            <h3>Balance (AIC)</h3>
-            <pre id="balance"></pre>
-          </div>
-          <div class="box">
-            <h3>Allowance → UM</h3>
-            <pre id="allowance"></pre>
-          </div>
-          <div class="box">
-            <h3>Usage / Epoch</h3>
-            <pre id="usage"></pre>
-          </div>
-        </div>
-      </section>
+            <section class="card">
+              <h2>Monitor</h2>
+              <div class="grid">
+                <div>
+                  <label>Your Address</label>
+                  <input id="userAddr" placeholder="0x..." />
+                </div>
+                <div class="actions">
+                  <button id="btnRefresh">Refresh</button>
+                </div>
+              </div>
+              <div class="row">
+                <div class="box">
+                  <h3>Balance (AIC)</h3>
+                  <pre id="balance"></pre>
+                </div>
+                <div class="box">
+                  <h3>Allowance → UM</h3>
+                  <pre id="allowance"></pre>
+                </div>
+                <div class="box">
+                  <h3>Usage / Epoch</h3>
+                  <pre id="usage"></pre>
+                </div>
+              </div>
+            </section>
 
-      <section class="card card-free-demo">
-        <h2>Demo gasto gratis</h2>
-        <div class="free-demo-grid">
-          <div class="free-demo-controls">
-            <button id="btnConnectWallet" type="button">Conectar billetera</button>
-            <label for="freeSpendUnits">Unidades a gastar</label>
-            <input id="freeSpendUnits" type="number" min="1" step="1" />
-            <button id="btnSpendFree" type="button">Gastar gratis</button>
-          </div>
-          <div class="free-demo-stats">
-            <div class="stat-card">
-              <span class="stat-label">Cuota gratuita disponible</span>
-              <span class="stat-value" id="freeQuotaInfo">Sin datos</span>
-            </div>
-            <div class="stat-card">
-              <span class="stat-label">Unidades pagadas / costo estimado</span>
-              <span class="stat-value" id="paidUsageInfo">0 / 0 AIC</span>
-            </div>
-          </div>
-        </div>
-      </section>
+            <section class="card card-free-demo">
+              <h2>Demo gasto gratis</h2>
+              <div class="free-demo-grid">
+                <div class="free-demo-controls">
+                  <button id="btnConnectWallet" type="button">Conectar billetera</button>
+                  <label for="freeSpendUnits">Unidades a gastar</label>
+                  <input id="freeSpendUnits" type="number" min="1" step="1" />
+                  <button id="btnSpendFree" type="button">Gastar gratis</button>
+                </div>
+                <div class="free-demo-stats">
+                  <div class="stat-card">
+                    <span class="stat-label">Cuota gratuita disponible</span>
+                    <span class="stat-value" id="freeQuotaInfo">Sin datos</span>
+                  </div>
+                  <div class="stat-card">
+                    <span class="stat-label">Unidades pagadas / costo estimado</span>
+                    <span class="stat-value" id="paidUsageInfo">0 / 0 AIC</span>
+                  </div>
+                </div>
+              </div>
+            </section>
 
-      <section class="card card-faucet">
-        <h2>Faucet</h2>
-        <div class="faucet-stats">
-          <div class="stat-card">
-            <span class="stat-label">Estado</span>
-            <span class="stat-value" id="faucetEnabled">Deshabilitado</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Monto por reclamo</span>
-            <span class="stat-value" id="faucetAmount">N/D</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Cooldown</span>
-            <span class="stat-value" id="faucetCooldown">N/D</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Tiempo restante</span>
-            <span class="stat-value" id="faucetRemaining">N/D</span>
-          </div>
-          <div class="stat-card">
-            <span class="stat-label">Último reclamo</span>
-            <span class="stat-value" id="faucetLastClaim">Sin datos</span>
-          </div>
-        </div>
-        <div class="grid faucet-form">
-          <div>
-            <label>Dirección a fondear</label>
-            <input id="faucetAddress" placeholder="0x..." />
-          </div>
-          <div class="actions">
-            <button id="btnFaucet" type="button">Reclamar faucet</button>
-          </div>
-        </div>
-        <pre id="faucetStatus"></pre>
-      </section>
+            <section class="card card-faucet">
+              <h2>Faucet</h2>
+              <div class="faucet-stats">
+                <div class="stat-card">
+                  <span class="stat-label">Estado</span>
+                  <span class="stat-value" id="faucetEnabled">Deshabilitado</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Monto por reclamo</span>
+                  <span class="stat-value" id="faucetAmount">N/D</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Cooldown</span>
+                  <span class="stat-value" id="faucetCooldown">N/D</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Tiempo restante</span>
+                  <span class="stat-value" id="faucetRemaining">N/D</span>
+                </div>
+                <div class="stat-card">
+                  <span class="stat-label">Último reclamo</span>
+                  <span class="stat-value" id="faucetLastClaim">Sin datos</span>
+                </div>
+              </div>
+              <div class="grid faucet-form">
+                <div>
+                  <label>Dirección a fondear</label>
+                  <input id="faucetAddress" placeholder="0x..." />
+                </div>
+                <div class="actions">
+                  <button id="btnFaucet" type="button">Reclamar faucet</button>
+                </div>
+              </div>
+              <pre id="faucetStatus"></pre>
+            </section>
 
-      <section class="card">
-        <h2>Actions</h2>
-        <div class="grid">
-          <div>
-            <label>Approve amount (AIC)</label>
-            <input id="approveAmount" type="number" />
-            <button id="btnApprove">Approve</button>
+            <section class="card">
+              <h2>Actions</h2>
+              <div class="grid">
+                <div>
+                  <label>Approve amount (AIC)</label>
+                  <input id="approveAmount" type="number" />
+                  <button id="btnApprove">Approve</button>
+                </div>
+                <div>
+                  <label>Authorize units</label>
+                  <input id="authUnits" type="number" />
+                  <button id="btnAuthorize">Authorize</button>
+                </div>
+              </div>
+              <div class="grid">
+                <div>
+                  <label>Mint to (owner-only)</label>
+                  <input id="mintTo" placeholder="0x..." />
+                </div>
+                <div>
+                  <label>Mint amount (AIC)</label>
+                  <input id="mintAmount" type="number" />
+                  <button id="btnMint">Mint</button>
+                </div>
+              </div>
+              <pre id="txlog"></pre>
+            </section>
           </div>
-          <div>
-            <label>Authorize units</label>
-            <input id="authUnits" type="number" />
-            <button id="btnAuthorize">Authorize</button>
+          <div class="tab-content" data-tab-panel="usage" hidden>
+            <section class="card card-usage">
+              <h2>Estadísticas de uso por billetera</h2>
+              <p class="usage-description">
+                Agregá direcciones para monitorear cuántas unidades consumieron en la época actual
+                y cuánta cuota gratuita les queda disponible.
+              </p>
+              <div class="usage-controls">
+                <div>
+                  <label for="usageAddressInput">Dirección</label>
+                  <input id="usageAddressInput" placeholder="0x..." autocomplete="off" />
+                </div>
+                <div>
+                  <label for="usageAddressLabel">Alias (opcional)</label>
+                  <input id="usageAddressLabel" placeholder="Equipo, cliente, etc." autocomplete="off" />
+                </div>
+                <div class="actions">
+                  <button id="btnAddUsageAddress" type="button">Agregar billetera</button>
+                </div>
+              </div>
+              <div class="usage-actions">
+                <div>
+                  <button id="btnRefreshUsageStats" type="button">Actualizar estadísticas</button>
+                  <button id="btnClearUsageStats" type="button" class="secondary">Limpiar lista</button>
+                </div>
+                <div class="usage-epoch" id="usageEpochInfo">Época actual: sin datos</div>
+              </div>
+              <div class="usage-table-wrapper">
+                <table class="usage-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Alias</th>
+                      <th scope="col">Dirección</th>
+                      <th scope="col" class="numeric">Unidades usadas</th>
+                      <th scope="col" class="numeric">Gratis restantes</th>
+                      <th scope="col" class="numeric">Gratis totales</th>
+                      <th scope="col" class="numeric">Pagas estimadas</th>
+                      <th scope="col">Última actualización</th>
+                      <th scope="col">Estado</th>
+                      <th scope="col">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody id="usageStatsBody">
+                    <tr class="usage-empty">
+                      <td colspan="9">Agregá una dirección para comenzar a monitorear el uso.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
         </div>
-        <div class="grid">
-          <div>
-            <label>Mint to (owner-only)</label>
-            <input id="mintTo" placeholder="0x..." />
-          </div>
-          <div>
-            <label>Mint amount (AIC)</label>
-            <input id="mintAmount" type="number" />
-            <button id="btnMint">Mint</button>
-          </div>
-        </div>
-        <pre id="txlog"></pre>
-      </section>
+      </div>
     </div>
     <script type="module" src="/src/main.js"></script>
   </body>

@@ -18,6 +18,21 @@ let backendConfig = null;
 let writesEnabled = false;
 let activeUserAddress = "";
 
+const tabState = {
+  active: "overview",
+};
+
+const USAGE_STORAGE_KEY = "tokenxllm.usageAddresses";
+
+const usageStatsState = {
+  addresses: [],
+  entries: new Map(),
+  isLoading: false,
+  epochId: null,
+  epochUpdatedAt: null,
+  epochError: "",
+};
+
 const freeQuotaState = {
   total: null,
   remaining: null,
@@ -125,6 +140,75 @@ function decimalsToStep(decimals) {
 
 function formatJson(data) {
   return JSON.stringify(data, null, 2);
+}
+
+function formatLocalDatetime(value) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "—";
+  }
+  try {
+    const date = new Date(numeric);
+    if (Number.isNaN(date.getTime())) {
+      return "—";
+    }
+    return date.toLocaleString();
+  } catch (error) {
+    return "—";
+  }
+}
+
+function formatUnits(value) {
+  if (value === null || value === undefined) {
+    return "N/D";
+  }
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return "N/D";
+  }
+  return numeric.toLocaleString();
+}
+
+function parseOptionalNumber(value) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function inferUsedUnits(usedResponse, freeQuotaResponse) {
+  if (usedResponse && hasOwn(usedResponse, "used_units")) {
+    const direct = parseOptionalNumber(usedResponse.used_units);
+    if (direct !== null) {
+      return direct;
+    }
+  }
+
+  if (freeQuotaResponse && hasOwn(freeQuotaResponse, "used_units")) {
+    const hinted = parseOptionalNumber(freeQuotaResponse.used_units);
+    if (hinted !== null) {
+      return hinted;
+    }
+  }
+
+  if (freeQuotaResponse) {
+    const total = hasOwn(freeQuotaResponse, "free_quota")
+      ? parseOptionalNumber(freeQuotaResponse.free_quota)
+      : null;
+    const remaining = hasOwn(freeQuotaResponse, "free_remaining")
+      ? parseOptionalNumber(freeQuotaResponse.free_remaining)
+      : null;
+
+    if (total !== null && remaining !== null) {
+      return Math.max(total - remaining, 0);
+    }
+  }
+
+  return null;
 }
 
 function formatBalanceResponse(data) {
@@ -586,6 +670,52 @@ function configureFormDefaults() {
   }
 }
 
+function switchTab(targetKey) {
+  if (!targetKey) {
+    return;
+  }
+
+  tabState.active = targetKey;
+  const buttons = document.querySelectorAll("[data-tab-target]");
+  buttons.forEach((button) => {
+    const tab = button.getAttribute("data-tab-target");
+    if (tab === targetKey) {
+      button.classList.add("is-active");
+      button.setAttribute("aria-selected", "true");
+      button.removeAttribute("tabindex");
+    } else {
+      button.classList.remove("is-active");
+      button.setAttribute("aria-selected", "false");
+      button.setAttribute("tabindex", "-1");
+    }
+  });
+
+  const panels = document.querySelectorAll("[data-tab-panel]");
+  panels.forEach((panel) => {
+    const tab = panel.getAttribute("data-tab-panel");
+    if (tab === targetKey) {
+      panel.classList.add("is-active");
+      panel.removeAttribute("hidden");
+    } else {
+      panel.classList.remove("is-active");
+      panel.setAttribute("hidden", "true");
+    }
+  });
+}
+
+function initTabs() {
+  const buttons = document.querySelectorAll("[data-tab-target]");
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const target = button.getAttribute("data-tab-target");
+      if (target) {
+        switchTab(target);
+      }
+    });
+  });
+  switchTab(tabState.active);
+}
+
 async function handleLoadConfig() {
   try {
     const config = await getBackendConfig();
@@ -871,6 +1001,381 @@ async function handleRequestFaucet() {
   }
 }
 
+function saveUsageAddresses() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+  try {
+    const payload = usageStatsState.addresses.map((address) => {
+      const entry = usageStatsState.entries.get(address);
+      return {
+        address,
+        label: entry?.label ?? "",
+      };
+    });
+    window.localStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    console.warn("Failed to persist usage addresses", error);
+  }
+}
+
+function addUsageAddress(address, label = "", options) {
+  const opts = options ?? {};
+  const normalized = normalizeHexAddress(address);
+  if (!normalized) {
+    return { added: false, normalized: "" };
+  }
+
+  const trimmedLabel = (label || "").trim();
+  let added = false;
+  let entry = usageStatsState.entries.get(normalized);
+  if (!entry) {
+    entry = {
+      address: normalized,
+      label: trimmedLabel,
+      usedUnits: null,
+      freeQuota: null,
+      freeRemaining: null,
+      paidUnits: null,
+      lastUpdated: null,
+      error: "",
+      loading: false,
+    };
+    usageStatsState.entries.set(normalized, entry);
+    usageStatsState.addresses.push(normalized);
+    added = true;
+  } else if (trimmedLabel && entry.label !== trimmedLabel) {
+    entry.label = trimmedLabel;
+  }
+
+  if (!opts.silent) {
+    saveUsageAddresses();
+    renderUsageStatsTable();
+  }
+
+  return { added, normalized };
+}
+
+function removeUsageAddress(address) {
+  const normalized = normalizeHexAddress(address);
+  if (!normalized) {
+    return;
+  }
+  const index = usageStatsState.addresses.indexOf(normalized);
+  if (index === -1) {
+    return;
+  }
+  usageStatsState.addresses.splice(index, 1);
+  usageStatsState.entries.delete(normalized);
+  saveUsageAddresses();
+  renderUsageStatsTable();
+}
+
+function clearUsageAddressesState() {
+  usageStatsState.addresses = [];
+  usageStatsState.entries.clear();
+  saveUsageAddresses();
+  renderUsageStatsTable();
+}
+
+function loadUsageAddresses() {
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(USAGE_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return;
+    }
+    parsed.forEach((item) => {
+      if (!item || typeof item !== "object") {
+        return;
+      }
+      const address = normalizeHexAddress(item.address);
+      if (!address) {
+        return;
+      }
+      const label = typeof item.label === "string" ? item.label : "";
+      addUsageAddress(address, label, { silent: true });
+    });
+  } catch (error) {
+    console.warn("Failed to load saved usage addresses", error);
+  }
+  renderUsageStatsTable();
+}
+
+function updateUsageEpochDisplay() {
+  const element = byId("usageEpochInfo");
+  if (!element) {
+    return;
+  }
+
+  element.classList.remove("error");
+
+  if (usageStatsState.epochId !== null) {
+    const timestamp = usageStatsState.epochUpdatedAt
+      ? ` (actualizado ${formatLocalDatetime(usageStatsState.epochUpdatedAt)})`
+      : "";
+    element.textContent = `Época actual: ${usageStatsState.epochId}${timestamp}`;
+    return;
+  }
+
+  if (usageStatsState.epochError) {
+    element.textContent = `No se pudo obtener la época actual: ${usageStatsState.epochError}`;
+    element.classList.add("error");
+    return;
+  }
+
+  element.textContent = "Época actual: sin datos";
+}
+
+function renderUsageStatsTable() {
+  const tbody = byId("usageStatsBody");
+  if (!tbody) {
+    return;
+  }
+
+  if (!usageStatsState.addresses.length) {
+    const emptyRow = document.createElement("tr");
+    emptyRow.className = "usage-empty";
+    const cell = document.createElement("td");
+    cell.colSpan = 9;
+    cell.textContent = "Agregá una dirección para comenzar a monitorear el uso.";
+    emptyRow.appendChild(cell);
+    tbody.replaceChildren(emptyRow);
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  usageStatsState.addresses.forEach((address) => {
+    const entry = usageStatsState.entries.get(address) ?? {
+      address,
+      label: "",
+      usedUnits: null,
+      freeQuota: null,
+      freeRemaining: null,
+      paidUnits: null,
+      lastUpdated: null,
+      error: "",
+      loading: false,
+    };
+
+    const row = document.createElement("tr");
+
+    const aliasCell = document.createElement("td");
+    aliasCell.textContent = entry.label || "—";
+    row.appendChild(aliasCell);
+
+    const addressCell = document.createElement("td");
+    const addressCode = document.createElement("code");
+    addressCode.textContent = address;
+    addressCell.appendChild(addressCode);
+    row.appendChild(addressCell);
+
+    const usedCell = document.createElement("td");
+    usedCell.className = "numeric";
+    usedCell.textContent = formatUnits(entry.usedUnits);
+    row.appendChild(usedCell);
+
+    const remainingCell = document.createElement("td");
+    remainingCell.className = "numeric";
+    remainingCell.textContent = formatUnits(entry.freeRemaining);
+    row.appendChild(remainingCell);
+
+    const quotaCell = document.createElement("td");
+    quotaCell.className = "numeric";
+    quotaCell.textContent = formatUnits(entry.freeQuota);
+    row.appendChild(quotaCell);
+
+    const paidCell = document.createElement("td");
+    paidCell.className = "numeric";
+    paidCell.textContent = formatUnits(entry.paidUnits);
+    row.appendChild(paidCell);
+
+    const updatedCell = document.createElement("td");
+    updatedCell.textContent = entry.lastUpdated ? formatLocalDatetime(entry.lastUpdated) : "—";
+    row.appendChild(updatedCell);
+
+    const statusCell = document.createElement("td");
+    const status = document.createElement("span");
+    status.classList.add("usage-status");
+    if (entry.loading) {
+      status.classList.add("usage-status-loading");
+      status.textContent = "Actualizando…";
+    } else if (entry.error) {
+      status.classList.add("usage-status-error");
+      status.textContent = entry.error;
+    } else if (entry.lastUpdated) {
+      status.classList.add("usage-status-ok");
+      status.textContent = "Actualizado";
+    } else {
+      status.classList.add("usage-status-muted");
+      status.textContent = "Sin datos";
+    }
+    statusCell.appendChild(status);
+    row.appendChild(statusCell);
+
+    const actionsCell = document.createElement("td");
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.className = "link-button usage-remove";
+    removeButton.dataset.action = "remove-usage";
+    removeButton.dataset.address = address;
+    removeButton.textContent = "Quitar";
+    actionsCell.appendChild(removeButton);
+    row.appendChild(actionsCell);
+
+    fragment.appendChild(row);
+  });
+
+  tbody.replaceChildren(fragment);
+}
+
+async function refreshUsageStats() {
+  if (!usageStatsState.addresses.length) {
+    alert("Agregá al menos una dirección para actualizar las estadísticas.");
+    return;
+  }
+
+  usageStatsState.isLoading = true;
+  usageStatsState.epochError = "";
+  usageStatsState.addresses.forEach((address) => {
+    const entry = usageStatsState.entries.get(address);
+    if (entry) {
+      entry.loading = true;
+    }
+  });
+  renderUsageStatsTable();
+
+  try {
+    const epoch = await getEpoch();
+    const epochId = epoch && hasOwn(epoch, "epoch_id") ? parseOptionalNumber(epoch.epoch_id) : null;
+    usageStatsState.epochId = epochId;
+    usageStatsState.epochUpdatedAt = Date.now();
+    usageStatsState.epochError = epochId === null ? "" : usageStatsState.epochError;
+  } catch (error) {
+    usageStatsState.epochId = null;
+    usageStatsState.epochUpdatedAt = Date.now();
+    usageStatsState.epochError = error?.message || String(error);
+  }
+
+  updateUsageEpochDisplay();
+
+  await Promise.all(
+    usageStatsState.addresses.map(async (address) => {
+      const entry = usageStatsState.entries.get(address);
+      if (!entry) {
+        return;
+      }
+      try {
+        const [used, freeQuota] = await Promise.all([getUsedUnits(address), getFreeQuota(address)]);
+        const usedUnits = inferUsedUnits(used, freeQuota);
+        const freeQuotaTotal = freeQuota && hasOwn(freeQuota, "free_quota")
+          ? parseOptionalNumber(freeQuota.free_quota)
+          : null;
+        const freeRemaining = freeQuota && hasOwn(freeQuota, "free_remaining")
+          ? parseOptionalNumber(freeQuota.free_remaining)
+          : null;
+
+        let paidUnits = null;
+        if (usedUnits !== null && freeQuotaTotal !== null) {
+          paidUnits = Math.max(usedUnits - freeQuotaTotal, 0);
+        }
+
+        entry.usedUnits = usedUnits;
+        entry.freeQuota = freeQuotaTotal;
+        entry.freeRemaining = freeRemaining;
+        entry.paidUnits = paidUnits;
+        entry.error = "";
+        entry.lastUpdated = Date.now();
+      } catch (error) {
+        entry.usedUnits = null;
+        entry.freeQuota = null;
+        entry.freeRemaining = null;
+        entry.paidUnits = null;
+        entry.error = error?.message || String(error);
+        entry.lastUpdated = Date.now();
+      } finally {
+        entry.loading = false;
+      }
+    }),
+  );
+
+  usageStatsState.isLoading = false;
+  updateUsageEpochDisplay();
+  renderUsageStatsTable();
+}
+
+function handleAddUsageAddress() {
+  const addressInput = byId("usageAddressInput");
+  const labelInput = byId("usageAddressLabel");
+  if (!addressInput) {
+    return;
+  }
+
+  const { value } = addressInput;
+  const label = labelInput ? labelInput.value : "";
+  if (!value || !value.trim()) {
+    alert("Ingresá una dirección para agregarla al monitoreo.");
+    return;
+  }
+
+  const { added, normalized } = addUsageAddress(value, label);
+  if (!normalized) {
+    alert("La dirección ingresada no es válida.");
+    return;
+  }
+
+  if (labelInput) {
+    labelInput.value = "";
+  }
+
+  addressInput.value = "";
+  if (!added) {
+    alert("La dirección ya estaba en la lista. Actualizamos el alias si correspondía.");
+  }
+}
+
+function handleRefreshUsageStats() {
+  void refreshUsageStats();
+}
+
+function handleClearUsageStats() {
+  if (!usageStatsState.addresses.length) {
+    return;
+  }
+  if (window.confirm("¿Querés quitar todas las direcciones monitoreadas?")) {
+    clearUsageAddressesState();
+    updateUsageEpochDisplay();
+  }
+}
+
+function handleUsageTableClick(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+  const button = target.closest("[data-action=\"remove-usage\"]");
+  if (!button) {
+    return;
+  }
+  const address = button.getAttribute("data-address");
+  if (address) {
+    removeUsageAddress(address);
+  }
+}
+
+function handleUsageInputKey(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    handleAddUsageAddress();
+  }
+}
+
 function attachEventHandlers() {
   const configButton = byId("btnConfig");
   const refreshButton = byId("btnRefresh");
@@ -882,6 +1387,12 @@ function attachEventHandlers() {
   const userInput = byId("userAddr");
   const faucetButton = byId("btnFaucet");
   const faucetInput = byId("faucetAddress");
+  const usageAddButton = byId("btnAddUsageAddress");
+  const usageRefreshButton = byId("btnRefreshUsageStats");
+  const usageClearButton = byId("btnClearUsageStats");
+  const usageAddressInput = byId("usageAddressInput");
+  const usageLabelInput = byId("usageAddressLabel");
+  const usageTableBody = byId("usageStatsBody");
 
   configButton?.addEventListener("click", handleLoadConfig);
   refreshButton?.addEventListener("click", handleRefresh);
@@ -897,14 +1408,23 @@ function attachEventHandlers() {
   faucetInput?.addEventListener("change", () => {
     void refreshFaucetState(readValue("faucetAddress"));
   });
+  usageAddButton?.addEventListener("click", handleAddUsageAddress);
+  usageRefreshButton?.addEventListener("click", handleRefreshUsageStats);
+  usageClearButton?.addEventListener("click", handleClearUsageStats);
+  usageTableBody?.addEventListener("click", handleUsageTableClick);
+  usageAddressInput?.addEventListener("keydown", handleUsageInputKey);
+  usageLabelInput?.addEventListener("keydown", handleUsageInputKey);
 }
 
 function init() {
+  initTabs();
   updateEnvironmentSection();
   configureFormDefaults();
   updateFreeQuotaDisplay();
   updatePaidUsageDisplay();
   updateFaucetDisplay();
+  loadUsageAddresses();
+  updateUsageEpochDisplay();
   exposeStarknetHelpers();
   attachEventHandlers();
   preloadBackendConfig();
