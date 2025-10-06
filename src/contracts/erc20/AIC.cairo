@@ -1,5 +1,5 @@
 #[starknet::contract]
-mod AIC {
+mod tokenxllm {
     use starknet::{ContractAddress, get_caller_address};
     use starknet::storage::{
         Map,

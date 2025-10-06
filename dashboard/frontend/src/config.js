@@ -19,7 +19,7 @@ const parsedDecimals = (() => {
 
 export const appConfig = {
   // Forzamos relativo para que pase por el proxy de Vercel
-  backendUrl: '/api',
+  backendUrl: import.meta.env.VITE_BACKEND_URL || '/api',
   rpcUrl: import.meta.env.VITE_RPC_URL || '',
   aicAddress: import.meta.env.VITE_AIC_ADDRESS || '',
   umAddress: import.meta.env.VITE_UM_ADDRESS || '',

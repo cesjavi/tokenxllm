@@ -1,4 +1,4 @@
-#!/home/cesar/tokenxllm/dashboard/backend/venv/bin/python3
+#!/home/cesar/tokenxllm/dashboard/backend/venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

@@ -20,4 +20,11 @@ if [ -f "$ARTIFACT_SOURCE" ]; then
 fi
 
 echo "==> Contratos disponibles:"
-jq -r '.contracts[] | .name' "$ARTIFACT_TARGET"
+echo "==> Contratos disponibles:"
+if jq -e '.contracts | type == "array"' "$ARTIFACT_TARGET" > /dev/null; then
+  # Formato viejo: array de contratos con campo .name
+  jq -r '.contracts[] | (.name // .contract_name // .id)' "$ARTIFACT_TARGET"
+else
+  # Formato nuevo: objeto cuyas keys son los nombres
+  jq -r '.contracts | keys[]' "$ARTIFACT_TARGET"
+fi

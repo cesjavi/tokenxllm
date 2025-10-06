@@ -31,7 +31,7 @@ echo "$OUT"
 
 AIC_ADDR=$(echo "$OUT" | grep -oiE 'contract[ _-]?address[: ]+0x[0-9a-f]+' | awk '{print $NF}' | tail -n1)
 if [ -z "$AIC_ADDR" ]; then
-  echo "No se pudo obtener la dirección del contrato AIC." >&2
+  echo "No se pudo obtener la dirección del contrato tokenxllm." >&2
   exit 1
 fi
 
