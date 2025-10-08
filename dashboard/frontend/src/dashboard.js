@@ -1,7 +1,8 @@
+import { uint256 } from "starknet";
 import { appConfig } from "./config.js";
 import {
-  approve,
-  authorize,
+  approve as approveBackend,
+  authorize as authorizeBackend,
   getAllowance,
   getBackendConfig,
   getBalance,
@@ -49,6 +50,10 @@ const paidConsumption = {
 };
 
 let latestPricePerUnitWei = null;
+
+let connectedWallet = null;
+let connectedWalletAccount = null;
+let connectedWalletAddress = "";
 
 const faucetState = {
   backendEnabled: true,
@@ -124,6 +129,49 @@ function normalizeHexAddress(value) {
   return "";
 }
 
+function getActiveWalletAccount() {
+  if (connectedWalletAccount && typeof connectedWalletAccount.execute === "function") {
+    return connectedWalletAccount;
+  }
+
+  const wallet = connectedWallet;
+  if (!wallet) {
+    return null;
+  }
+
+  if (typeof wallet.execute === "function") {
+    return wallet;
+  }
+
+  if (wallet.account && typeof wallet.account.execute === "function") {
+    connectedWalletAccount = wallet.account;
+    return connectedWalletAccount;
+  }
+
+  if (wallet.selectedAccount && typeof wallet.selectedAccount.execute === "function") {
+    connectedWalletAccount = wallet.selectedAccount;
+    return connectedWalletAccount;
+  }
+
+  if (Array.isArray(wallet.accounts)) {
+    const candidate = wallet.account || wallet.accounts.find((acc) => acc && typeof acc.execute === "function");
+    if (candidate && typeof candidate.execute === "function") {
+      connectedWalletAccount = candidate;
+      return connectedWalletAccount;
+    }
+  }
+
+  return null;
+}
+
+function requireConfiguredAddress(rawValue, label) {
+  const normalized = normalizeHexAddress(rawValue);
+  if (!normalized) {
+    throw new Error(`${label} no está configurado.`);
+  }
+  return normalized;
+}
+
 function setUserAddressValue(address) {
   const input = byId("userAddr");
   if (input) {
@@ -170,6 +218,78 @@ function formatUnits(value) {
     return "N/D";
   }
   return numeric.toLocaleString();
+}
+
+function parseAmountToWei(value, decimals) {
+  if (typeof value !== "string") {
+    value = value === undefined || value === null ? "" : String(value);
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error("Ingresa un monto válido.");
+  }
+
+  if (!/^\d+(?:\.\d+)?$/.test(trimmed)) {
+    throw new Error("El monto debe ser un número decimal positivo.");
+  }
+
+  const [wholePart, decimalPart = ""] = trimmed.split(".");
+  if (!/^\d+$/.test(wholePart) || !/^\d*$/.test(decimalPart)) {
+    throw new Error("El monto contiene caracteres inválidos.");
+  }
+
+  const allowedDecimals = Number.isFinite(decimals) && decimals > 0 ? Math.trunc(decimals) : 0;
+  if (decimalPart.length > allowedDecimals) {
+    throw new Error(`El monto no puede tener más de ${allowedDecimals} decimales.`);
+  }
+
+  const padded = decimalPart.padEnd(Math.max(allowedDecimals, 0), "0");
+  const combined = `${wholePart}${padded}`.replace(/^0+(?=\d)/, "");
+  return BigInt(combined || "0");
+}
+
+function formatTxHash(value) {
+  if (value === null || value === undefined) {
+    return "";
+  }
+
+  if (typeof value === "string") {
+    if (value.startsWith("0x") || value.startsWith("0X")) {
+      return value;
+    }
+    try {
+      return `0x${BigInt(value).toString(16)}`;
+    } catch (error) {
+      return value;
+    }
+  }
+
+  if (typeof value === "bigint") {
+    return `0x${value.toString(16)}`;
+  }
+
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return `0x${value.toString(16)}`;
+  }
+
+  return "";
+}
+
+function buildWalletTxResponse(result) {
+  const hash =
+    result?.transaction_hash ??
+    result?.transactionHash ??
+    result?.hash ??
+    result?.transactionHashHex ??
+    null;
+
+  const txHash = formatTxHash(hash);
+  if (!txHash) {
+    return { tx_hash: "" };
+  }
+
+  return { tx_hash: txHash };
 }
 
 function parseOptionalNumber(value) {
@@ -557,22 +677,41 @@ function displaySignerAddress(address) {
   setText("signerAddress", address || "Not configured");
 }
 
+function setButtonState(buttonId, enabled, disabledMessage) {
+  const button = byId(buttonId);
+  if (!button) {
+    return;
+  }
+
+  button.disabled = !enabled;
+  if (!enabled && disabledMessage) {
+    button.setAttribute("title", disabledMessage);
+  } else {
+    button.removeAttribute("title");
+  }
+}
+
+function updateActionButtonsState() {
+  const walletReady = Boolean(getActiveWalletAccount());
+  const backendReady = Boolean(writesEnabled);
+  const usageEnabled = walletReady || backendReady;
+
+  const usageDisabledMessage = usageEnabled
+    ? ""
+    : "Conecta una billetera o configura credenciales en el backend.";
+
+  setButtonState("btnSpendFree", usageEnabled, usageDisabledMessage);
+  setButtonState("btnAuthorize", usageEnabled, usageDisabledMessage);
+  setButtonState("btnApprove", usageEnabled, usageDisabledMessage);
+
+  const mintDisabledMessage = "Backend writes are disabled";
+  setButtonState("btnMint", backendReady, mintDisabledMessage);
+}
+
 function applyWriteAvailability(enabled) {
   writesEnabled = Boolean(enabled);
-  const buttons = ["btnApprove", "btnAuthorize", "btnMint", "btnSpendFree", "btnFaucet"]
-    .map((id) => byId(id))
-    .filter(Boolean);
-
-  buttons.forEach((button) => {
-    button.disabled = !writesEnabled;
-    if (writesEnabled) {
-      button.removeAttribute("title");
-    } else {
-      button.setAttribute("title", "Backend writes are disabled");
-    }
-  });
-
   setText("writesEnabled", writesEnabled ? "Yes" : "No");
+  updateActionButtonsState();
   updateFaucetDisplay();
 }
 
@@ -602,12 +741,90 @@ async function preloadBackendConfig() {
   }
 }
 
-function ensureWritesAreEnabled() {
+function ensureBackendWritesEnabled() {
   if (!writesEnabled) {
-    alert("Writes are disabled on the backend. Configure signer credentials first.");
+    alert("Las escrituras en el backend están deshabilitadas. Configura las credenciales primero.");
     return false;
   }
   return true;
+}
+
+function ensureUsageSigner() {
+  if (getActiveWalletAccount()) {
+    return "wallet";
+  }
+  if (writesEnabled) {
+    return "backend";
+  }
+  alert("Conecta una billetera o configura credenciales de backend para enviar transacciones.");
+  return null;
+}
+
+async function approveWithWallet(amountInput, spenderOverride) {
+  const account = getActiveWalletAccount();
+  if (!account) {
+    throw new Error("Conecta una billetera compatible para firmar transacciones.");
+  }
+
+  const tokenAddress = requireConfiguredAddress(appConfig.aicAddress, "La dirección del token AIC");
+  const spenderAddress = requireConfiguredAddress(
+    spenderOverride || appConfig.umAddress,
+    "La dirección del UsageManager",
+  );
+
+  const decimals = Number.isFinite(appConfig.decimals) ? Number(appConfig.decimals) : 18;
+  const amountWei = parseAmountToWei(amountInput, decimals);
+  if (amountWei <= 0n) {
+    throw new Error("El monto debe ser mayor a cero.");
+  }
+
+  const amountU256 = uint256.bnToUint256(amountWei);
+  const call = {
+    contractAddress: tokenAddress,
+    entrypoint: "approve",
+    calldata: [
+      spenderAddress,
+      amountU256.low.toString(),
+      amountU256.high.toString(),
+    ],
+  };
+
+  const result = await account.execute(call);
+  return buildWalletTxResponse(result);
+}
+
+async function authorizeWithWallet(units) {
+  const account = getActiveWalletAccount();
+  if (!account) {
+    throw new Error("Conecta una billetera compatible para firmar transacciones.");
+  }
+
+  const umAddress = requireConfiguredAddress(appConfig.umAddress, "La dirección del UsageManager");
+  const callBase = {
+    contractAddress: umAddress,
+    entrypoint: "authorize_usage",
+  };
+
+  try {
+    const result = await account.execute({ ...callBase, calldata: [units.toString()] });
+    return buildWalletTxResponse(result);
+  } catch (error) {
+    const message = (error?.message || String(error)).toLowerCase();
+    if (
+      message.includes("entrypoint") ||
+      message.includes("calldata") ||
+      message.includes("invalid")
+    ) {
+      const encoded = uint256.bnToUint256(BigInt(units.toString()));
+      const fallbackCall = {
+        ...callBase,
+        calldata: [encoded.low.toString(), encoded.high.toString()],
+      };
+      const fallbackResult = await account.execute(fallbackCall);
+      return buildWalletTxResponse(fallbackResult);
+    }
+    throw error;
+  }
 }
 
 function updateEnvironmentSection() {
@@ -799,6 +1016,15 @@ async function handleConnectWallet() {
       return;
     }
 
+    connectedWallet = connection?.wallet || null;
+    connectedWalletAccount =
+      connection?.account ||
+      connection?.wallet?.account ||
+      connection?.wallet?.selectedAccount ||
+      null;
+    connectedWalletAddress = normalized;
+    updateActionButtonsState();
+
     setUserAddressValue(normalized);
     setActiveUserAddress(normalized);
     await handleRefresh();
@@ -810,26 +1036,40 @@ async function handleConnectWallet() {
 }
 
 async function handleApprove() {
-  if (!ensureWritesAreEnabled()) {
+  const signer = ensureUsageSigner();
+  if (!signer) {
     return;
   }
+
   const value = readValue("approveAmount");
-  const amount = Number(value);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    alert("Enter a valid amount to approve");
+  if (!value) {
+    alert("Ingresa un monto para aprobar.");
     return;
   }
 
   try {
-    const response = await approve(amount);
+    let response;
+    if (signer === "wallet") {
+      response = await approveWithWallet(value);
+    } else {
+      const amount = Number(value);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        alert("Enter a valid amount to approve");
+        return;
+      }
+      response = await approveBackend(amount);
+    }
+
     setText("txlog", `approve tx: ${response.tx_hash}`);
+    await handleRefresh();
   } catch (error) {
     setText("txlog", `approve error: ${error}`);
   }
 }
 
 async function handleSpendFree() {
-  if (!ensureWritesAreEnabled()) {
+  const signer = ensureUsageSigner();
+  if (!signer) {
     return;
   }
 
@@ -847,6 +1087,19 @@ async function handleSpendFree() {
   }
 
   setActiveUserAddress(userAddress);
+
+  if (signer === "wallet" && connectedWalletAddress) {
+    const normalizedUser = normalizeHexAddress(userAddress).toLowerCase();
+    const normalizedWallet = connectedWalletAddress.toLowerCase();
+    if (normalizedUser && normalizedUser !== normalizedWallet) {
+      const proceed = window.confirm(
+        `Vas a firmar con ${connectedWalletAddress}, pero el campo de usuario contiene ${normalizedUser}. ¿Continuar igualmente?`,
+      );
+      if (!proceed) {
+        return;
+      }
+    }
+  }
 
   let remaining = freeQuotaState.remaining;
   let total = freeQuotaState.total;
@@ -894,7 +1147,8 @@ async function handleSpendFree() {
   }
 
   try {
-    const response = await authorize(units);
+    const response =
+      signer === "wallet" ? await authorizeWithWallet(units) : await authorizeBackend(units);
     setText("txlog", `gasto gratis tx: ${response.tx_hash}`);
 
     if (paidUnits > 0) {
@@ -914,9 +1168,11 @@ async function handleSpendFree() {
 }
 
 async function handleAuthorize() {
-  if (!ensureWritesAreEnabled()) {
+  const signer = ensureUsageSigner();
+  if (!signer) {
     return;
   }
+  const userAddress = readValue("userAddr");
   const value = readValue("authUnits");
   const units = Number.parseInt(value, 10);
   if (!Number.isInteger(units) || units <= 0) {
@@ -924,8 +1180,22 @@ async function handleAuthorize() {
     return;
   }
 
+  if (signer === "wallet" && connectedWalletAddress && userAddress) {
+    const normalizedUser = normalizeHexAddress(userAddress).toLowerCase();
+    const normalizedWallet = connectedWalletAddress.toLowerCase();
+    if (normalizedUser && normalizedUser !== normalizedWallet) {
+      const proceed = window.confirm(
+        `Vas a firmar con ${connectedWalletAddress}, pero el campo de usuario contiene ${normalizedUser}. ¿Continuar igualmente?`,
+      );
+      if (!proceed) {
+        return;
+      }
+    }
+  }
+
   try {
-    const response = await authorize(units);
+    const response =
+      signer === "wallet" ? await authorizeWithWallet(units) : await authorizeBackend(units);
     setText("txlog", `authorize tx: ${response.tx_hash}`);
   } catch (error) {
     setText("txlog", `authorize error: ${error}`);
@@ -933,7 +1203,7 @@ async function handleAuthorize() {
 }
 
 async function handleMint() {
-  if (!ensureWritesAreEnabled()) {
+  if (!ensureBackendWritesEnabled()) {
     return;
   }
   const to = readValue("mintTo");
@@ -958,7 +1228,7 @@ async function handleMint() {
 }
 
 async function handleRequestFaucet() {
-  if (!ensureWritesAreEnabled()) {
+  if (!ensureBackendWritesEnabled()) {
     return;
   }
 
