@@ -32,6 +32,15 @@ AIC_ADDR_H = (os.getenv("AIC_ADDR") or "").strip()
 UM_ADDR_H  = (os.getenv("UM_ADDR")  or "").strip()
 DECIMALS   = int(os.getenv("AIC_DECIMALS", "18"))
 
+def _require_env_addr(v: str | None, name: str) -> str:
+    """
+    Devuelve la dirección (hex) si está configurada; si no, lanza HTTP 400.
+    Normaliza trims y permite '0x...'.
+    """
+    vv = (v or "").strip()
+    if not vv:
+        raise HTTPException(status_code=400, detail=f"{name} not configured")
+    return vv
 
 def _env_bool(name: str, default: bool = False) -> bool:
     value = os.getenv(name)
@@ -73,10 +82,11 @@ _ACCOUNT_LOCK = asyncio.Lock()
 
 _FAUCET_LAST_CLAIMS: dict[str, float] = {}
 _FAUCET_LOCK = asyncio.Lock()
+_TX_LOCK = asyncio.Lock()
 
 # Storage slots (compatibles con tu contrato original)
-_FREE_QUOTA_KEY = get_storage_var_address("UsageManager_free_quota_per_epoch")
-_PRICE_PER_UNIT_BASE_KEY = get_storage_var_address("UsageManager_price_per_unit_wei")
+_FREE_QUOTA_KEY = get_storage_var_address("free_quota_per_epoch")
+_PRICE_PER_UNIT_BASE_KEY = get_storage_var_address("price_per_unit_wei")
 
 # -------------------- utils --------------------
 
@@ -297,22 +307,40 @@ def _normalize_faucet_key(value: str) -> str:
 async def _invoke(to_addr_hex: str, fn: str, calldata: list[int]) -> str:
     account = await _get_account()
     call = Call(to_addr=_h(to_addr_hex), selector=get_selector_from_name(fn), calldata=calldata)
-    try:
-        if hasattr(account, "execute_v3"):
-            tx = await account.execute_v3(calls=[call], auto_estimate=True)
-        else:
-            tx = await account.execute(calls=[call], version=3, auto_estimate=True)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to submit transaction: {exc!r}") from exc
+
+    async with _TX_LOCK:
+        # función interna para ejecutar con la versión apropiada
+        async def _do_execute(use_v3_first: bool = True):
+            if use_v3_first and hasattr(account, "execute_v3"):
+                return await account.execute_v3(calls=[call], auto_estimate=True, nonce=await account.get_nonce())
+            # fallback a v1 si no hay v3
+            return await account.execute(calls=[call], version=1, auto_estimate=True, nonce=await account.get_nonce())
+
+        # 1er intento
+        try:
+            try:
+                tx = await _do_execute(use_v3_first=True)
+            except Exception as exc:
+                msg = str(exc).lower()
+                # si falla por versión v3, probá v1 directo
+                if any(s in msg for s in ("unsupported_tx_version", "invalid transaction version", "v3")):
+                    tx = await _do_execute(use_v3_first=False)
+                else:
+                    raise
+
+        except Exception as exc:
+            msg = str(exc).lower()
+            # retry UNA VEZ si es nonce inválido: refrescamos nonce y reenviamos
+            if "invalid transaction nonce" in msg or "nonce" in msg and "invalid" in msg:
+                try:
+                    tx = await _do_execute(use_v3_first=hasattr(account, "execute_v3"))
+                except Exception as exc2:
+                    raise HTTPException(status_code=502, detail=f"Failed to submit transaction (nonce-retry): {exc2!r}") from exc2
+            else:
+                raise HTTPException(status_code=502, detail=f"Failed to submit transaction: {exc!r}") from exc
 
     tx_hash = getattr(tx, "hash", None) or getattr(tx, "transaction_hash", None)
     return hex(tx_hash) if isinstance(tx_hash, int) else str(tx_hash)
-
-def _require_env_addr(v: str, name: str) -> str:
-    if not v:
-        raise HTTPException(status_code=400, detail=f"{name} not configured")
-    return v
-
 
 async def _build_faucet_info(address: str | None = None) -> FaucetInfo:
     amount_wei = _safe_faucet_amount_wei()
@@ -347,19 +375,28 @@ async def _build_faucet_info(address: str | None = None) -> FaucetInfo:
 
 # -------------------- FastAPI --------------------
 
-_ALLOWED_ORIGINS = ["http://localhost:5173"]
+# Configurar orígenes permitidos
+_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:5500",  
+    "http://127.0.0.1:5500",
+    "http://localhost:3000",  
+    "http://127.0.0.1:8080",
+]
+
 for origin in _split_env_list(os.getenv("DASHBOARD_PUBLIC_URL")):
     if origin not in _ALLOWED_ORIGINS:
         _ALLOWED_ORIGINS.append(origin)
 
 app = FastAPI(title="tokenxllm backend", version="0.2.0")
-# Permitir localhost (Vite 5173) y los orígenes configurados en DASHBOARD_PUBLIC_URL
+
+# CORS Middleware - CORSMiddleware debe ir PRIMERO
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*"]    
 )
 class SetFreeQuotaBody(BaseModel):
     new_quota: int  # u64 en Cairo
@@ -506,15 +543,26 @@ async def approve(body: ApproveRequest):
 async def authorize(body: AuthorizeRequest):
     um = _require_env_addr(UM_ADDR_H, "UM_ADDR")
     units = int(body.units)
-    # primero intentá felt
+
+    # 1) intento con felt
     try:
-        return {"tx_hash": await _invoke(um, "authorize_usage", [units])}
-    except HTTPException as e:
-        # si fue ENTRYPOINT o calldata mismatch, probá u256
-        if "ENTRYPOINT" in str(e.detail) or "calldata" in str(e.detail) or "invalid" in str(e.detail).lower():
-            lo, hi = _to_u256(units)
-            return {"tx_hash": await _invoke(um, "authorize_usage", [lo, hi])}
-        raise
+        tx_hash = await _invoke(um, "authorize_usage", [units])
+        return {"tx_hash": tx_hash, "encoding": "felt"}
+    except HTTPException as e_felt:
+        # 2) fallback u256 (calculá lo/hi ANTES de usarlos)
+        lo, hi = _to_u256(units)
+        try:
+            tx_hash = await _invoke(um, "authorize_usage", [lo, hi])
+            return {"tx_hash": tx_hash, "encoding": "u256"}
+        except HTTPException as e_u256:
+            raise HTTPException(
+                status_code=502,
+                detail={
+                    "error": "authorize_usage failed for both encodings",
+                    "felt_try": getattr(e_felt, "detail", str(e_felt)),
+                    "u256_try": getattr(e_u256, "detail", str(e_u256)),
+                },
+            )
 
 
 @app.post("/mint")

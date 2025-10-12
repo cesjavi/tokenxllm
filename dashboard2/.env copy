@@ -1,0 +1,28 @@
+# Starknet RPC endpoint used by starknet.js provider
+RPC_URL=https://starknet-sepolia.public.blastapi.io/rpc/v0_9
+CHAIN_ID=SN_SEPOLIA
+# Contracts used by the dashboard
+#AIC_ADDR=0x0083ce9c62abf9c717fb824f346746d25b8181c254acd7ed9fef7842ef0179f5
+AIC_ADDR=0x0083ce9c62abf9c717fb824f346746d25b8181c254acd7ed9fef7842ef0179f5
+AIC_ADDRESS=0x0083ce9c62abf9c717fb824f346746d25b8181c254acd7ed9fef7842ef0179f5
+
+#UM_ADDR=0x04515dc0c7ccb8c2816cd95ca16db10eb3c8071dafea05414fd078c4dc41473a 
+#UM_ADDR=0x044af39b19758d164f398c76941df5577a3c85e733db61e12e04803122ce28b8
+UM_ADDR=0x044af39b19758d164f398c76941df5577a3c85e733db61e12e04803122ce28b8
+CLASS_HASH_TOKENXLLM=0x317ab82ed36ab500d211718f911b14085ecb0b768cbfc9681ec8e285b0e2203
+CLASS_HASH_UM=0x02f0138bd302692bb1c1b01561f72f6df01a0aa09c1470a132f6837b0a26fc97
+#ACCOUNT_ADDRESS=0x51f16fa66c656cc380fa1efab8de8d1d85bd02dd99db80570e81159bc75fca7
+PRIVATE_KEY=0x7dc940d63edbda37a1baeaf94ac56f7bce9e6fa8e1e67b2e31ad048ea134eae
+ACCOUNT_ADDRESS=0x522570db5197d282febafea3538ff2deacfaf49ec85a86e30bbe45af6f7c90
+#PRIVATE_KEY=0x0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef  # misma cuenta del accounts-file
+
+# Token decimals used to configure inputs
+DECIMALS=18
+FAUCET_ENABLED=true
+# Backend REST API base URL
+BACKEND_URL=http://localhost:8000
+# Parámetros de UI/cálculo
+DECIMALS=18
+EPOCH_SECONDS=86400       # 1 día (ajustá si querés)
+FREE_QUOTA_PER_EPOCH=100  # cupo gratis por epoch
+COST_PER_UNIT_AIC=0.01    # costo estimado para calcular allowance/coste

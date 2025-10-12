@@ -16,3 +16,4 @@ sncast --account "$ACCOUNT" --accounts-file "$ACC_FILE" \
     "$AIC_ADDR" "$OWNER_ADDR" \
     3000 10000000000000000 0 \
     86400 "$OWNER_ADDR"
+
