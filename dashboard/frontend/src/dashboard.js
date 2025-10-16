@@ -830,7 +830,9 @@ async function authorizeWithWallet(units) {
 function updateEnvironmentSection() {
   setText("backendUrl", appConfig.backendUrl || "Not configured");
   setText("rpcUrl", appConfig.rpcUrl || "Not configured");
-  setText("aicAddress", appConfig.aicAddress || "Not configured");
+  const tokenAddressValue = appConfig.aicAddress || "Not configured";
+  setText("tokenXllmAddress", tokenAddressValue);
+  setText("aicAddress", tokenAddressValue);
   setText("umAddress", appConfig.umAddress || "Not configured");
   setText("decimals", String(appConfig.decimals));
   applyWriteAvailability(writesEnabled);
