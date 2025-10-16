@@ -485,6 +485,62 @@
         let connectedAddress = null;
         let contractAddresses = { token: null, usageManager: null };
 
+        function extractAccountInfo(...sources) {
+            for (const src of sources) {
+                if (!src) continue;
+
+                const accountsArray = Array.isArray(src)
+                    ? src
+                    : Array.isArray(src?.accounts)
+                    ? src.accounts
+                    : [];
+
+                let account =
+                    src?.account ||
+                    src?.selectedAccount ||
+                    (accountsArray.length ? accountsArray[0] : null);
+
+                if (!account && src?.wallet) {
+                    account = src.wallet.account || null;
+                }
+
+                let address =
+                    (typeof account === 'string' ? account : account?.address) ||
+                    src?.selectedAddress ||
+                    src?.selectedAccountAddress ||
+                    (accountsArray.length
+                        ? typeof accountsArray[0] === 'string'
+                            ? accountsArray[0]
+                            : accountsArray[0]?.address
+                        : null);
+
+                if (!address && Array.isArray(src) && src.length) {
+                    address =
+                        typeof src[0] === 'string'
+                            ? src[0]
+                            : src[0]?.address || null;
+                }
+
+                if (address) {
+                    if (typeof account === 'string') {
+                        account = null;
+                    }
+
+                    if (!account && typeof src?.account === 'object') {
+                        account = src.account;
+                    }
+
+                    if (!account && Array.isArray(src?.accounts) && src.accounts[0]?.address) {
+                        account = src.accounts[0];
+                    }
+
+                    return { account: account || null, address };
+                }
+            }
+
+            return { account: null, address: null };
+        }
+
         // ======================
 // Helpers para ejecutar directamente en la wallet
 // ======================
@@ -553,79 +609,129 @@ async function callAuthorize(units) {
                 console.log('Intentando conectar wallet...');
                 console.log('window.starknet_argentX:', window.starknet_argentX);
                 console.log('window.starknet:', window.starknet);
-                
+                console.log('window.braavos:', window.braavos);
+
                 // Esperar a que la wallet esté disponible
                 let attempts = 0;
-                while (!window.starknet && attempts < 10) {
+                while (
+                    !window.starknet &&
+                    !window.starknet_argentX &&
+                    !window.starknet_braavos &&
+                    !window.braavos &&
+                    attempts < 10
+                ) {
                     await new Promise(resolve => setTimeout(resolve, 100));
                     attempts++;
                 }
-                
-                if (!window.starknet && !window.starknet_argentX && !window.starknet_braavos) {
-                    showToast('Por favor instala una wallet de Starknet', 'error');
+
+                if (
+                    !window.starknet &&
+                    !window.starknet_argentX &&
+                    !window.starknet_braavos &&
+                    !window.braavos
+                ) {
+                    showToast('Por favor instala una wallet de Starknet (Argent X o Braavos)', 'error');
+                    window.open('https://www.braavos.app/download', '_blank');
                     window.open('https://www.argent.xyz/argent-x/', '_blank');
                     return;
                 }
-                
+
                 // Intentar con diferentes proveedores
                 let starknet = null;
-                
+                let enableResult = null;
+
                 // 1. Intentar con el proveedor genérico (Ready Wallet/ArgentX)
                 if (window.starknet) {
                     console.log('Usando window.starknet');
                     starknet = await window.starknet.enable();
+                    enableResult = starknet;
                 }
                 // 2. Intentar con argentX explícitamente
                 else if (window.starknet_argentX) {
                     console.log('Usando window.starknet_argentX');
                     starknet = await window.starknet_argentX.enable();
+                    enableResult = starknet;
                 }
-                // 3. Intentar con Braavos
+                // 3. Intentar con Braavos usando el objeto legacy
                 else if (window.starknet_braavos) {
                     console.log('Usando window.starknet_braavos');
                     starknet = await window.starknet_braavos.enable();
+                    enableResult = starknet;
                 }
-                
+                // 4. Intentar con la API moderna de Braavos
+                else if (window.braavos) {
+                    console.log('Usando window.braavos');
+                    const braavos = window.braavos;
+                    try {
+                        if (typeof braavos.request === 'function') {
+                            try {
+                                enableResult = await braavos.request({ type: 'starknet_requestAccounts' });
+                            } catch (requestError) {
+                                console.warn('starknet_requestAccounts falló, intentando wallet_requestAccounts', requestError);
+                                enableResult = await braavos.request({ method: 'wallet_requestAccounts' });
+                            }
+                        } else if (typeof braavos.enable === 'function') {
+                            enableResult = await braavos.enable();
+                        }
+                    } catch (walletError) {
+                        console.error('Error solicitando cuentas a Braavos:', walletError);
+                        throw walletError;
+                    }
+
+                    starknet = braavos.starknet || braavos;
+                }
+
                 if (!starknet) {
                     showToast('No se pudo conectar con la wallet', 'error');
                     return;
                 }
-                
+
+                const { account, address } = extractAccountInfo(
+                    enableResult,
+                    starknet,
+                    window.starknet,
+                    window.starknet_argentX,
+                    window.starknet_braavos,
+                    window.braavos
+                );
+
+                snAccount =
+                    account ||
+                    starknet?.account ||
+                    window.braavos?.account ||
+                    window.starknet?.account ||
+                    window.starknet_argentX?.account ||
+                    window.starknet_braavos?.account ||
+                    null;
+                connectedAddress = address || null;
+
                 console.log('Wallet conectada:', starknet);
                 console.log('isConnected:', starknet.isConnected);
-                console.log('selectedAddress:', starknet.selectedAddress);
-                console.log('account:', starknet.account);
-                
-                // Manejar diferentes formatos de respuesta
-                if (Array.isArray(starknet) && starknet.length > 0) {
-                    // Ready Wallet devuelve un array con la dirección
-                    connectedAddress = starknet[0];
-                    snAccount = window.starknet.account;
-                } else {
-                    // Otras wallets devuelven un objeto
-                    snAccount = starknet.account;
-                    connectedAddress = starknet.selectedAddress || starknet.account?.address;
-                }
-                
-                console.log('Dirección extraída:', connectedAddress);
-                
+                console.log('selectedAddress:', connectedAddress);
+                console.log('account:', snAccount);
+
                 if (!connectedAddress) {
                     showToast('No se pudo obtener la dirección de la wallet', 'error');
                     return;
                 }
-                
+
+                if (!snAccount) {
+                    showToast('La wallet no expuso el objeto account necesario', 'error');
+                    return;
+                }
+
                 walletAddress.textContent = `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`;
                 walletInfo.classList.add('connected');
                 connectBtn.style.display = 'none';
                 disconnectBtn.style.display = 'block';
                 quotaBanner.classList.add('show');
-                
+
                 await loadDashboardData();
                 showToast('Wallet conectada exitosamente', 'success');
-                
+
             } catch (error) {
                 console.error('Error connecting wallet:', error);
-                showToast('Error al conectar wallet: ' + error.message, 'error');
+                showToast('Error al conectar wallet: ' + (error?.message || error), 'error');
             }
         });
 
@@ -635,6 +741,8 @@ async function callAuthorize(units) {
                     await window.starknet_argentX.disable?.();
                 } else if (window.starknet_braavos?.isConnected) {
                     await window.starknet_braavos.disable?.();
+                } else if (window.braavos?.isConnected) {
+                    await window.braavos.disable?.();
                 } else if (window.starknet?.isConnected) {
                     await window.starknet.disable?.();
                 }
