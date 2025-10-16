@@ -12,10 +12,27 @@ from dotenv import load_dotenv
 from pathlib import Path
 import asyncio
 from types import SimpleNamespace
+from typing import Optional
+
+from fastapi import FastAPI, Request, Form, HTTPException, Body, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
+from fastapi.middleware.cors import CORSMiddleware
+
+
 app = FastAPI(title="TokenXLLM Dashboard")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5500",
+        "http://127.0.0.1:5500",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Configuración de templates
 templates_dir = Path(__file__).parent / "templates"
@@ -342,26 +359,67 @@ async def dashboard(request: Request):
     return templates.TemplateResponse("dashboard.html", {"request": request, **data})
 
 @app.post("/mint")
-async def mint_tokens(address: str = Form(...), amount: float = Form(...)):
-    """Mintea tokens a una dirección"""
-    try:
-        # Decimales
-        decimals_result = await call_contract(TOKEN_ADDRESS, "decimals")
-        decimals = decimals_result[0] if decimals_result else 18
+async def mint_tokens(
+    address: Optional[str] = Form(None),
+    amount: Optional[float] = Form(None),
+    body: Optional[dict] = Body(None),
+):
+    if body:
+        address = body.get("to") or address
+        amount = body.get("amount") if body.get("amount") is not None else amount
+    if not address or amount is None:
+        raise HTTPException(status_code=400, detail="Faltan parámetros")
 
-        # Cantidad a u256
-        amount_wei = int(amount * (10 ** decimals))
-        low = amount_wei & ((1 << 128) - 1)
-        high = amount_wei >> 128
+    decimals_result = await call_contract(TOKEN_ADDRESS, "decimals")
+    decimals = decimals_result[0] if decimals_result else 18
+    amount_wei = int(float(amount) * (10 ** decimals))
+    low = amount_wei & ((1 << 128) - 1)
+    high = amount_wei >> 128
 
-        # Tx
-        tx_calldata = [int(address, 16), low, high]
-        tx = Call(to_addr=TOKEN_ADDRESS, selector=get_selector_from_name("mint"), calldata=tx_calldata)
-        resp = await send_calls([tx])
-        
-        return RedirectResponse(url="/?success=mint", status_code=303)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    tx = Call(to_addr=TOKEN_ADDRESS, selector=get_selector_from_name("mint"), calldata=[int(address, 16), low, high])
+    resp = await send_calls([tx])
+
+    txh = getattr(resp, "transaction_hash", None)
+    return {"tx_hash": hex(txh) if isinstance(txh, int) else txh}
+
+@app.post("/set_price")
+async def set_price(
+    price: Optional[float] = Form(None),
+    body: Optional[dict] = Body(None),
+):
+    # frontend envía { "price_AIC": number }
+    if body and "price_AIC" in body:
+        price = body["price_AIC"]
+    if price is None:
+        raise HTTPException(status_code=400, detail="Falta price/price_AIC")
+
+    decimals_result = await call_contract(TOKEN_ADDRESS, "decimals")
+    decimals = decimals_result[0] if decimals_result else 18
+    price_wei = int(float(price) * (10 ** decimals))
+    low = price_wei & ((1 << 128) - 1)
+    high = price_wei >> 128
+
+    tx = Call(to_addr=USAGE_MANAGER_ADDRESS, selector=get_selector_from_name("set_price_per_unit_wei"), calldata=[low, high])
+    resp = await send_calls([tx])
+
+    txh = getattr(resp, "transaction_hash", None)
+    return {"tx_hash": hex(txh) if isinstance(txh, int) else txh}
+
+@app.post("/set_free_quota")
+async def set_free_quota(
+    new_quota: Optional[int] = Form(None),
+    body: Optional[dict] = Body(None),
+):
+    if body and "new_quota" in body:
+        new_quota = body["new_quota"]
+    if new_quota is None:
+        raise HTTPException(status_code=400, detail="Falta new_quota")
+
+    tx = Call(to_addr=USAGE_MANAGER_ADDRESS, selector=get_selector_from_name("set_free_quota_per_epoch"), calldata=[int(new_quota)])
+    resp = await send_calls([tx])
+
+    txh = getattr(resp, "transaction_hash", None)
+    return {"tx_hash": hex(txh) if isinstance(txh, int) else txh}
 
 @app.post("/approve")
 async def approve_tokens(spender: str = Form(...), amount: float = Form(...)):
@@ -469,6 +527,66 @@ async def check_usage(address: str):
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+from typing import Optional
+from fastapi import Body, Query
+
+def _hex_or_none(x):
+    try:
+        return hex(x)
+    except Exception:
+        return None
+
+@app.get("/config")
+async def api_config():
+    return {
+        "rpc_url": RPC_URL,
+        "aic_addr": _hex_or_none(TOKEN_ADDRESS),
+        "um_addr": _hex_or_none(USAGE_MANAGER_ADDRESS),
+        "treasury_addr": _hex_or_none(TREASURY_ADDRESS),
+        # Para mostrar sección admin en el frontend:
+        "account_address": ADMIN_ADDRESS if isinstance(ADMIN_ADDRESS, str) else hex(ADMIN_ADDRESS) if ADMIN_ADDRESS else None,
+    }
+
+@app.get("/epoch")
+async def api_epoch():
+    r = await call_contract(USAGE_MANAGER_ADDRESS, "get_epoch_id")
+    return {"epoch_id": (r[0] if r else 0)}
+
+@app.get("/balance")
+async def api_balance(user: str = Query(..., description="0x...")):
+    bal = await call_contract(TOKEN_ADDRESS, "balanceOf", [int(user, 16)])
+    dec = await call_contract(TOKEN_ADDRESS, "decimals")
+    decimals = dec[0] if dec else 18
+    value = u256_to_int(bal) if bal else 0
+    return {
+        "user": user,
+        "balance_wei": value,
+        "balance_AIC": value / (10 ** decimals),
+    }
+
+@app.get("/free_quota")
+async def api_free_quota(user: Optional[str] = Query(None)):
+    quota = await call_contract(USAGE_MANAGER_ADDRESS, "get_free_quota_per_epoch")
+    price = await call_contract(USAGE_MANAGER_ADDRESS, "get_price_per_unit_wei")
+    used = 0
+    if user:
+        used_r = await call_contract(USAGE_MANAGER_ADDRESS, "used_in_current_epoch", [int(user, 16)])
+        used = used_r[0] if used_r else 0
+
+    dec = await call_contract(TOKEN_ADDRESS, "decimals")
+    decimals = dec[0] if dec else 18
+    price_wei = u256_to_int(price) if price else 0
+
+    free_quota = quota[0] if quota else 0
+    free_remaining = max(0, free_quota - used)
+
+    return {
+        "free_quota": free_quota,
+        "used_units": used,
+        "free_remaining": free_remaining,
+        "price_per_unit_wei": str(price_wei),  # tu frontend lo divide por 1e18
+    }
 
 # Template HTML
 HTML_TEMPLATE = """

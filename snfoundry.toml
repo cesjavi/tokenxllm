@@ -12,3 +12,6 @@
 [sncast.default]
 url = "https://starknet-sepolia.public.blastapi.io/rpc/v0_9"
 account = "dev"
+
+[workspace.dependencies]
+starknet = "2.12.2"

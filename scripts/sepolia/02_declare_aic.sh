@@ -9,11 +9,11 @@ require_cmd jq
 
 cd "$ROOT_DIR"
 
-echo "==> Declarando contrato tokenxllm"
+echo "==> Declarando contrato AIC"
 OUT=$(sncast --account "$ACCOUNT_NAME" --accounts-file "$ACCOUNTS_FILE" \
   declare --url "$RPC_URL" \
   --package tokenxllm \
-  --contract-name tokenxllm 2>&1)
+  --contract-name AIC 2>&1)
 
 echo "$OUT"
 
