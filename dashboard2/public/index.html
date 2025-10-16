@@ -762,18 +762,18 @@ async function callAuthorize(units) {
 
         async function loadDashboardData() {
             try {
-                const configRes = await fetch(`${BACKEND_URL}/config`);
+                const configRes = await fetch(`/api/config`);
                 const config = await configRes.json();
                 
                 contractAddresses.token = config.aic_addr;
                 contractAddresses.usageManager = config.um_addr;
                 
                 if (connectedAddress) {
-                    const balanceRes = await fetch(`${BACKEND_URL}/balance?user=${connectedAddress}`);
+                    const balanceRes = await fetch(`/api/balance?user=${connectedAddress}`);
                     const balanceData = await balanceRes.json();
                     walletBalance.textContent = `Balance: ${parseFloat(balanceData.balance_AIC).toFixed(2)} AIC`;
                     
-                    const quotaRes = await fetch(`${BACKEND_URL}/free_quota?user=${connectedAddress}`);
+                    const quotaRes = await fetch(`/api/free_quota?user=${connectedAddress}`);
                     const quotaData = await quotaRes.json();
                     updateQuotaDisplay(quotaData);
                     
@@ -782,7 +782,7 @@ async function callAuthorize(units) {
                     }
                 }
                 
-                const epochRes = await fetch(`${BACKEND_URL}/epoch`);
+                const epochRes = await fetch(`/api/epoch`);
                 const epochData = await epochRes.json();
                 document.getElementById('currentEpoch').textContent = epochData.epoch_id;
                 
@@ -857,7 +857,7 @@ async function callAuthorize(units) {
             }
             
             try {
-                const response = await fetch(`${BACKEND_URL}/mint`, {
+                const response = await fetch(`/api/mint`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ to: address, amount })
@@ -885,7 +885,7 @@ async function callAuthorize(units) {
             }
             
             try {
-                const response = await fetch(`${BACKEND_URL}/set_price`, {
+                const response = await fetch(`/api/set_price`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ price_AIC: price })
@@ -913,7 +913,7 @@ async function callAuthorize(units) {
             }
             
             try {
-                const response = await fetch(`${BACKEND_URL}/set_free_quota`, {
+                const response = await fetch(`/api/set_free_quota`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ new_quota: quota })
@@ -934,14 +934,14 @@ async function callAuthorize(units) {
 
         (async () => {
             try {
-                const configRes = await fetch(`${BACKEND_URL}/config`);
+                const configRes = await fetch(`/api/config`);
                 const config = await configRes.json();
                 
-                const epochRes = await fetch(`${BACKEND_URL}/epoch`);
+                const epochRes = await fetch(`/api/epoch`);
                 const epochData = await epochRes.json();
                 document.getElementById('currentEpoch').textContent = epochData.epoch_id;
                 
-                const quotaRes = await fetch(`${BACKEND_URL}/free_quota`);
+                const quotaRes = await fetch(`/api/free_quota`);
                 const quotaData = await quotaRes.json();
                 document.getElementById('freeQuota').textContent = quotaData.free_quota.toLocaleString();
                 document.getElementById('pricePerUnit').textContent = (parseFloat(quotaData.price_per_unit_wei) / 1e18).toFixed(4);
